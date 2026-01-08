@@ -80,16 +80,31 @@ try:
     picked_ids = [p['player_id'] for p in picks_data]
     picked_names_norm = [normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data]
     
-    # 3. Processamento
+    # 3. Processamento de Dados
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
     
-    # Filtragem Inteligente (ID ou Nome)
-    available = df_scored[
-        (~df_scored['sleeper_id'].isin(picked_ids)) & 
-        (~df_scored['norm_name'].isin(picked_names_norm))
-    ].copy()
+    # --- AJUSTE DE SEGURANÇA PARA O FILTRO ---
+    # Convertemos tudo para String para evitar que o Python ache que "123" é diferente de 123
+    picked_ids_str = [str(pid) for pid in picked_ids]
+    
+    # Criamos um conjunto (set) de nomes e IDs draftados para busca ultra-rápida e precisa
+    picked_names_set = set(picked_names_norm)
+    
+    # Filtragem: O jogador só fica se:
+    # 1. O ID dele (em texto) não estiver nos IDs draftados
+    # 2. O Nome dele (normalizado) não estiver nos Nomes draftados
+    
+    def is_available(row):
+        sid = str(row['sleeper_id']) if pd.notna(row['sleeper_id']) else ""
+        name = row['norm_name']
+        
+        if sid in picked_ids_str: return False
+        if name in picked_names_set: return False
+        return True
+
+    available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
     # 4. DASHBOARD
