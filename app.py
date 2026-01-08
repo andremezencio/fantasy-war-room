@@ -129,7 +129,6 @@ if st.checkbox("🔍 Debug: Por que Lamar ainda está aqui?"):
     st.write("IDs que o Sleeper diz que já foram draftados:", picked_ids_str)
     
     st.write("Nomes que o Sleeper diz que já foram draftados (normalizados):", list(picked_names_set))
-    
     st.subheader("🎯 Melhores Disponíveis (Algoritmo v4.0)")
     st.dataframe(
         available[['Player', 'FantPos', 'Media_4_Anos', 'ADP', 'Proj', 'Score_Final']].head(25),
