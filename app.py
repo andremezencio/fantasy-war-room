@@ -84,9 +84,22 @@ try:
 
     # 4. DASHBOARD
     col1, col2, col3 = st.columns(3)
-    col1.metric("Pick Atual", len(picked_ids) + 1)
-    col2.metric("Jogadores Restantes", len(available))
-    col3.metric("Última Pick", picks_res.json()[-1]['metadata']['full_name'] if picked_ids else "Nenhuma")
+    
+    # Conta quantos picks já foram feitos
+    total_picks = len(picks_res.json())
+    col1.metric("Pick Atual", total_picks + 1)
+    
+    # Mostra quantos jogadores sobraram na sua lista
+    col2.metric("Disponíveis", len(available))
+    
+    # Lógica segura para mostrar a última pick
+    if total_picks > 0:
+        # Tenta pegar o nome completo, se não tiver, usa o ID
+        last_pick_data = picks_res.json()[-1]
+        nome_ultimo = last_pick_data.get('metadata', {}).get('full_name', f"ID: {last_pick_data['player_id']}")
+        col3.metric("Última Pick", nome_ultimo)
+    else:
+        col3.metric("Última Pick", "Nenhuma")
 
     st.subheader("🎯 Top Picks Recomendadas")
     
