@@ -53,7 +53,9 @@ st.title("🏈 Fantasy War Room 2026")
 st.sidebar.header("Configurações")
 
 draft_id = st.sidebar.text_input("Sleeper Draft ID", value="1314740945048043520")
-st.sidebar.info("O app sincroniza automaticamente ao recarregar.")
+if st.sidebar.button("🔄 Forçar Atualização"):
+    st.cache_data.clear() # Limpa o cache para garantir dados frescos
+    st.rerun() # Recarrega o app
 
 try:
     # 1. Conexão com Dados
