@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import unicodedata
+import re
 from streamlit_gsheets import GSheetsConnection
 
 # Configuração da Página
@@ -16,9 +17,14 @@ def clean_num(val):
 
 def normalize_name(name):
     if not isinstance(name, str): return ""
-    # Remove acentos, pontos, sufixos e padroniza para minúsculo
+    # Remove acentos
     name = "".join(c for c in unicodedata.normalize('NFD', name) if unicodedata.category(c) != 'Mn')
-    name = name.lower().replace('.', '').replace("'", "").replace(" jr", "").replace(" iii", "").replace(" ii", "").replace(" sr", "")
+    # Remove TUDO que não seja letra (pontos, espaços extras, números, símbolos)
+    name = re.sub(r'[^a-zA-Z]', '', name.lower())
+    # Remove sufixos comuns
+    for suffix in ['jr', 'iii', 'ii', 'sr', 'iv']:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
     return name.strip()
 
 @st.cache_data(ttl=3600)
