@@ -71,8 +71,21 @@ def calculate_war_room_score(df):
 
 # --- PROCESSAMENTO ---
 try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
+    # --- AJUSTE DO PASSO 2 AQUI ---
+    # Pegamos a URL dos Secrets
+    sheet_url = st.secrets["spreadsheet_url"]
+    
+    # Esta lógica transforma o link do Google Sheets em um link de download de CSV
+    if "/edit" in sheet_url:
+        csv_url = sheet_url.split('/edit')[0] + '/export?format=csv'
+    else:
+        csv_url = sheet_url
+
+    # Lemos os dados diretamente com o Pandas, sem precisar da biblioteca GSheets
+    df_raw = pd.read_csv(csv_url)
+    # ---------------------------------------------
+
+    # O resto do seu código continua igual daqui para baixo...
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
