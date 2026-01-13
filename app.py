@@ -43,10 +43,9 @@ def get_sleeper_players():
         res = requests.get("https://api.sleeper.app/v1/players/nfl")
         players = res.json()
         mapping = {f"{v['first_name']} {v['last_name']}": k for k, v in players.items() if v.get('active')}
-        mapping["Lamar Jackson"] = "4881"
         return mapping
     except:
-        return {"Lamar Jackson": "4881"}
+        return {}
 
 def calculate_war_room_score(df):
     def score_row(row):
@@ -82,13 +81,13 @@ try:
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
 
-    # 1. Busca Picks primeiro para alimentar a Sidebar
-    draft_id_input = "1316854024770686976" # Valor padrão
-    
     # --- SIDEBAR ---
     with st.sidebar:
         st.title("🏈 War Room Config")
-        draft_id = st.text_input("Sleeper Draft ID", value=draft_id_input)
+        draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
+        
+        # Nome para busca manual
+        meu_nome_sleeper = st.text_input("Seu Usuário Sleeper", value="dedemezencio")
         
         if st.button("🔄 Atualizar"):
             st.cache_data.clear()
@@ -97,40 +96,30 @@ try:
         st.divider()
         st.subheader("📋 Meu Roster")
         
-        # BUSCA DADOS DO SLEEPER
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
         if picks_data:
-            # Mapeia quais roster_ids existem e que nomes eles têm no metadata
-            roster_map = {}
+            # LÓGICA DE BUSCA TEXTUAL: Varre tudo em busca do seu nome
+            my_picks = []
             for p in picks_data:
-                rid = p.get('roster_id')
-                if rid not in roster_map:
-                    # Tenta achar um nome amigável para esse Slot
-                    meta = p.get('metadata', {})
-                    nome_display = meta.get('display_name') or meta.get('team_name') or f"Time Slot {rid}"
-                    roster_map[rid] = nome_display
+                # Transforma todo o conteúdo da pick em uma string única para busca
+                conteudo_da_pick = str(p).lower()
+                if meu_nome_sleeper.lower() in conteudo_da_pick:
+                    my_picks.append(p)
             
-            # Dropdown para você escolher qual desses times é o seu
-            escolha_roster = st.selectbox(
-                "Quem é você no Draft?", 
-                options=list(roster_map.keys()), 
-                format_func=lambda x: roster_map[x]
-            )
-            
-            # Filtra e exibe
-            my_picks = [p for p in picks_data if p.get('roster_id') == escolha_roster]
-            my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
-            
-            for p in my_picks_sorted:
-                p_name = p.get('metadata', {}).get('full_name', 'Player')
-                p_pos = p.get('metadata', {}).get('position', '??')
-                st.write(f"**{p_pos}**: {p_name}")
+            if my_picks:
+                my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
+                for p in my_picks_sorted:
+                    p_name = p.get('metadata', {}).get('full_name', 'Jogador')
+                    p_pos = p.get('metadata', {}).get('position', '??')
+                    st.write(f"**{p_pos}**: {p_name}")
+            else:
+                st.info(f"Nenhuma pick encontrada para '{meu_nome_sleeper}'. Verifique o nome no Sleeper.")
         else:
-            st.write("Aguardando picks iniciais...")
+            st.write("Draft sem escolhas.")
 
-    # 3. Disponibilidade e Dashboard
+    # 3. Disponibilidade
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
     
@@ -147,13 +136,13 @@ try:
     available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- UI DASHBOARD ---
+    # --- UI ---
     col1, col2, col3 = st.columns([1, 1, 2])
     col1.metric("Pick Atual", len(picks_data) + 1)
     col2.metric("Disponíveis", len(available))
     if picks_data:
         last = picks_data[-1]
-        nome_l = last.get('metadata', {}).get('full_name', f"ID: {last['player_id']}")
+        nome_l = last.get('metadata', {}).get('full_name', 'N/A')
         col3.metric("Última Pick", nome_l)
 
     st.divider()
