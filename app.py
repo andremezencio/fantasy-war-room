@@ -119,9 +119,15 @@ try:
             if my_picks:
                 my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
                 for p in my_picks_sorted:
-                    p_name = p.get('metadata', {}).get('full_name', 'Jogador')
-                    p_pos = p.get('metadata', {}).get('position', '??')
-                    st.write(f"**{p_pos}**: {p_name}")
+                meta = p.get('metadata', {})
+                # Tenta buscar o nome em todas as chaves possíveis que o Sleeper usa
+                p_name = (
+                    meta.get('full_name') or 
+                    f"{meta.get('first_name', '')} {meta.get('last_name', '')}".strip() or 
+                    "Jogador"
+                )
+                p_pos = meta.get('position', '??')
+                st.write(f"**{p_pos}**: {p_name}")
             else:
                 st.info(f"Aguardando sua vez de escolher na posição {minha_posicao}...")
         else:
