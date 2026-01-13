@@ -71,61 +71,60 @@ def calculate_war_room_score(df):
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- SIDEBAR (Sempre Visível) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🏈 War Room Config")
-    draft_id = st.text_input("Sleeper Draft ID", value="1314740945048043520")
+    # Atualizado com seu novo ID de teste
+    draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
     
-    btn_update = st.button("🔄 Forçar Atualização")
-    if btn_update:
+    # Nome do botão alterado conforme solicitado
+    if st.button("🔄 Atualizar"):
         st.cache_data.clear()
-        # Não usamos rerun aqui para evitar loops no erro, ele atualizará no próximo ciclo
+        st.rerun()
 
     st.divider()
     st.subheader("📋 Meu Roster")
-    roster_placeholder = st.empty() # Espaço reservado para o Roster
+    roster_placeholder = st.empty()
 
-# --- PROCESSAMENTO PRINCIPAL ---
+# --- PROCESSAMENTO ---
 try:
-    # 1. Carregar Planilha
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
 
-    # 2. Carregar Sleeper (Picks e Usuários)
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
     
-    # Busca Picks
+    # Busca Picks e Usuários
     resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
-    if resp_picks.status_code != 200:
-        st.error("Draft ID não encontrado no Sleeper.")
-        st.stop()
-    picks_data = resp_picks.json()
+    picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
     
-    # Busca Usuários
     resp_users = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/users")
     users_data = resp_users.json() if resp_users.status_code == 200 else []
     
-    # Seletor de Time no Sidebar
+    # Lógica do Roster na Sidebar
     if users_data:
-        user_names = {u['user_id']: u['display_name'] for u in users_data}
+        user_names = {u['user_id']: u.get('display_name', u.get('metadata', {}).get('team_name', 'Time')) for u in users_data}
+        # Se for um Mock Draft sem usuários reais, o Sleeper às vezes não retorna display_name, usamos um fallback
         selected_user = st.sidebar.selectbox("Selecione seu Time", options=list(user_names.keys()), format_func=lambda x: user_names[x])
         
-        # Preencher Roster no Sidebar
-        my_picks = [p for p in picks_data if p['picked_by'] == selected_user]
+        # Filtra as picks que pertencem ao ID do usuário selecionado ou ao slot dele
+        my_picks = [p for p in picks_data if str(p.get('picked_by')) == str(selected_user) or str(p.get('roster_id')) == str(selected_user)]
+        
         with roster_placeholder.container():
             if my_picks:
-                for p in my_picks:
+                # Ordenar por posição para ficar bonito
+                my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
+                for p in my_picks_sorted:
                     p_name = p.get('metadata', {}).get('full_name', 'Player')
                     p_pos = p.get('metadata', {}).get('position', '??')
                     st.write(f"**{p_pos}**: {p_name}")
             else:
-                st.write("Aguardando escolhas...")
+                st.write("Aguardando escolhas no Sleeper...")
 
-    # 3. Filtragem de Disponíveis
+    # Filtragem de Disponíveis
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
     
@@ -142,7 +141,7 @@ try:
     available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- UI DASHBOARD ---
+    # --- UI ---
     col1, col2, col3 = st.columns([1, 1, 2])
     col1.metric("Pick Atual", len(picks_data) + 1)
     col2.metric("Disponíveis", len(available))
@@ -176,5 +175,4 @@ try:
     with tabs[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
 
 except Exception as e:
-    st.error(f"Erro ao processar dados: {e}")
-    st.info("Dica: Verifique se o Draft ID é válido e se a liga já foi criada no Sleeper.")
+    st.error(f"Erro: {e}")
