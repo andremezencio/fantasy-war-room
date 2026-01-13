@@ -115,14 +115,23 @@ try:
     my_picks = [p for p in picks_data if str(p.get('roster_id')) == str(my_slot)]
     
     with roster_placeholder.container():
-        if my_picks:
-            my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
-            for p in my_picks_sorted:
-                p_name = p.get('metadata', {}).get('full_name', 'Player')
-                p_pos = p.get('metadata', {}).get('position', '??')
-                st.write(f"**{p_pos}**: {p_name}")
+        if picks_data:
+            # DEDO-DURO: Mostra quais IDs de roster já fizeram escolhas
+            ids_que_ja_escolheram = set([str(p.get('roster_id')) for p in picks_data])
+            st.caption(f"Slots com picks feitas: {', '.join(sorted(ids_que_ja_escolheram))}")
+            
+            my_picks = [p for p in picks_data if str(p.get('roster_id')) == str(my_slot)]
+            
+            if my_picks:
+                my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
+                for p in my_picks_sorted:
+                    p_name = p.get('metadata', {}).get('full_name', 'Player')
+                    p_pos = p.get('metadata', {}).get('position', '??')
+                    st.write(f"**{p_pos}**: {p_name}")
+            else:
+                st.write(f"Nenhuma pick no slot {my_slot} ainda.")
         else:
-            st.write(f"Aguardando escolhas no slot {my_slot}...")
+            st.write("Sem dados de picks no Sleeper.")
 
     # 3. Disponibilidade e Pontuação
     picked_ids_str = [str(p['player_id']) for p in picks_data]
