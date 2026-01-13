@@ -82,16 +82,13 @@ try:
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
 
+    # 1. Busca Picks primeiro para alimentar a Sidebar
+    draft_id_input = "1316854024770686976" # Valor padrão
+    
     # --- SIDEBAR ---
     with st.sidebar:
         st.title("🏈 War Room Config")
-        draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
-        
-        # Campo para digitar seu usuário exatamente como no Sleeper
-        user_name_input = st.text_input("Seu Usuário Sleeper", value="dedemezencio")
-        
-        # Backup por Slot caso o nome falhe
-        my_slot = st.number_input("Ou Posição (Slot)", min_value=1, max_value=12, value=1)
+        draft_id = st.text_input("Sleeper Draft ID", value=draft_id_input)
         
         if st.button("🔄 Atualizar"):
             st.cache_data.clear()
@@ -100,32 +97,40 @@ try:
         st.divider()
         st.subheader("📋 Meu Roster")
         
+        # BUSCA DADOS DO SLEEPER
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
-        # Lógica de Filtro: Procura pelo nome digitado OU pelo slot
-        my_picks = []
-        for p in picks_data:
-            meta = p.get('metadata', {})
-            # Verifica se o seu nome está em algum campo de metadata ou se o slot bate
-            is_me = (
-                meta.get('display_name') == user_name_input or 
-                meta.get('first_name') == user_name_input or
-                str(p.get('roster_id')) == str(my_slot)
+        if picks_data:
+            # Mapeia quais roster_ids existem e que nomes eles têm no metadata
+            roster_map = {}
+            for p in picks_data:
+                rid = p.get('roster_id')
+                if rid not in roster_map:
+                    # Tenta achar um nome amigável para esse Slot
+                    meta = p.get('metadata', {})
+                    nome_display = meta.get('display_name') or meta.get('team_name') or f"Time Slot {rid}"
+                    roster_map[rid] = nome_display
+            
+            # Dropdown para você escolher qual desses times é o seu
+            escolha_roster = st.selectbox(
+                "Quem é você no Draft?", 
+                options=list(roster_map.keys()), 
+                format_func=lambda x: roster_map[x]
             )
-            if is_me:
-                my_picks.append(p)
-        
-        if my_picks:
+            
+            # Filtra e exibe
+            my_picks = [p for p in picks_data if p.get('roster_id') == escolha_roster]
             my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
+            
             for p in my_picks_sorted:
                 p_name = p.get('metadata', {}).get('full_name', 'Player')
                 p_pos = p.get('metadata', {}).get('position', '??')
                 st.write(f"**{p_pos}**: {p_name}")
         else:
-            st.write("Aguardando escolhas...")
+            st.write("Aguardando picks iniciais...")
 
-    # 3. Disponibilidade
+    # 3. Disponibilidade e Dashboard
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
     
@@ -166,13 +171,15 @@ try:
             hide_index=True, use_container_width=True
         )
 
-    with tabs[0]: show_table(available)
-    with tabs[1]: show_table(available[available['FantPos'] == 'QB'])
-    with tabs[2]: show_table(available[available['FantPos'] == 'RB'])
-    with tabs[3]: show_table(available[available['FantPos'] == 'WR'])
-    with tabs[4]: show_table(available[available['FantPos'] == 'TE'])
-    with tabs[5]: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
-    with tabs[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
+    for i, t in enumerate(tabs):
+        with t:
+            if i == 0: show_table(available)
+            elif i == 1: show_table(available[available['FantPos'] == 'QB'])
+            elif i == 2: show_table(available[available['FantPos'] == 'RB'])
+            elif i == 3: show_table(available[available['FantPos'] == 'WR'])
+            elif i == 4: show_table(available[available['FantPos'] == 'TE'])
+            elif i == 5: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
+            elif i == 6: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
 
 except Exception as e:
     st.error(f"Erro: {e}")
