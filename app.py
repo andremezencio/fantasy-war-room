@@ -82,12 +82,11 @@ try:
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
 
     # --- SIDEBAR ---
-    # --- SIDEBAR ---
     with st.sidebar:
         st.title("🏈 War Room Config")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
         
-        # Agora usamos a sua Posição Real que você confirmou ser a #1
+        # Posição e Total de Times para o cálculo matemático
         minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
         num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
         
@@ -102,15 +101,13 @@ try:
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
         if picks_data:
-            # LÓGICA MATEMÁTICA DE SLOT (A prova de falhas para Mocks)
             my_picks = []
             for p in picks_data:
                 p_no = p.get('pick_no')
-                # Cálculo de Snake Draft: descobre se a pick_no pertence ao seu slot
                 round_no = ((p_no - 1) // num_times) + 1
-                if round_no % 2 != 0: # Round Ímpar (1, 3, 5...)
+                if round_no % 2 != 0: # Round Ímpar
                     slot_da_pick = ((p_no - 1) % num_times) + 1
-                else: # Round Par (2, 4, 6...) - Ordem Inversa
+                else: # Round Par
                     slot_da_pick = num_times - ((p_no - 1) % num_times)
                 
                 if slot_da_pick == minha_posicao:
@@ -119,17 +116,17 @@ try:
             if my_picks:
                 my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
                 for p in my_picks_sorted:
-                meta = p.get('metadata', {})
-                # Tenta buscar o nome em todas as chaves possíveis que o Sleeper usa
-                p_name = (
-                    meta.get('full_name') or 
-                    f"{meta.get('first_name', '')} {meta.get('last_name', '')}".strip() or 
-                    "Jogador"
-                )
-                p_pos = meta.get('position', '??')
-                st.write(f"**{p_pos}**: {p_name}")
+                    meta = p.get('metadata', {})
+                    # Busca de nome em múltiplos campos para evitar o "Jogador"
+                    p_name = (
+                        meta.get('full_name') or 
+                        f"{meta.get('first_name', '')} {meta.get('last_name', '')}".strip() or 
+                        "Jogador"
+                    )
+                    p_pos = meta.get('position', '??')
+                    st.write(f"**{p_pos}**: {p_name}")
             else:
-                st.info(f"Aguardando sua vez de escolher na posição {minha_posicao}...")
+                st.info(f"Aguardando sua vez na posição {minha_posicao}...")
         else:
             st.write("Draft sem escolhas.")
 
