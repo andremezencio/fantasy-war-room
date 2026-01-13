@@ -4,7 +4,6 @@ import requests
 import unicodedata
 import re
 from streamlit_gsheets import GSheetsConnection
-import plotly as px
 
 # Configuração da Página
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
@@ -84,7 +83,7 @@ try:
 
     # --- SIDEBAR ---
     with st.sidebar:
-        st.title("🏈 War Room")
+        st.title("🏈 War Room Config")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
         minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
         num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
@@ -127,7 +126,7 @@ try:
                 m = p.get('metadata', {})
                 st.caption(f"#{p['pick_no']} {m.get('position')} {m.get('full_name')}")
 
-    # --- CÁLCULO DE DISPONIBILIDADE E POWER RANKING SEM VIÉS ---
+    # --- CÁLCULO POWER RANKING ---
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
@@ -163,12 +162,7 @@ try:
             if slot == minha_posicao: label = "🏆 VOCÊ"
             
             if qtd > 0:
-                ranking_data.append({
-                    "Time": label, 
-                    "Média por Pick": media, 
-                    "Qtd": qtd,
-                    "is_me": (slot == minha_posicao)
-                })
+                ranking_data.append({"Time": label, "Média por Pick": media, "Qtd": qtd})
     
     df_ranking = pd.DataFrame(ranking_data).sort_values(by="Média por Pick", ascending=False)
 
@@ -209,14 +203,11 @@ try:
             else:
                 st.subheader("Ranking de Eficiência (Média de Valor por Pick)")
                 if not df_ranking.empty:
-                    fig = px.bar(df_ranking, x="Média por Pick", y="Time", orientation='h',
-                                 color="is_me", color_discrete_map={True: "#4CAF50", False: "#31333F"},
-                                 text="Média por Pick")
-                    fig.update_layout(showlegend=False, height=450, margin=dict(l=0, r=0, t=10, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Gráfico Nativo do Streamlit (Não precisa de instalação extra)
+                    st.bar_chart(df_ranking, x="Time", y="Média por Pick")
                     st.table(df_ranking[["Time", "Média por Pick", "Qtd"]])
                 else:
                     st.info("Aguardando picks para gerar análise...")
 
 except Exception as e:
-    st.error(f"Erro: {e}")
+    st.error(f"Erro no sistema: {e}")
