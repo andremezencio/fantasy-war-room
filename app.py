@@ -82,12 +82,14 @@ try:
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
 
     # --- SIDEBAR ---
+    # --- SIDEBAR ---
     with st.sidebar:
         st.title("🏈 War Room Config")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
         
-        # Nome para busca manual
-        meu_nome_sleeper = st.text_input("Seu Usuário Sleeper", value="dedemezencio")
+        # Agora usamos a sua Posição Real que você confirmou ser a #1
+        minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
+        num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
         
         if st.button("🔄 Atualizar"):
             st.cache_data.clear()
@@ -100,12 +102,18 @@ try:
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
         if picks_data:
-            # LÓGICA DE BUSCA TEXTUAL: Varre tudo em busca do seu nome
+            # LÓGICA MATEMÁTICA DE SLOT (A prova de falhas para Mocks)
             my_picks = []
             for p in picks_data:
-                # Transforma todo o conteúdo da pick em uma string única para busca
-                conteudo_da_pick = str(p).lower()
-                if meu_nome_sleeper.lower() in conteudo_da_pick:
+                p_no = p.get('pick_no')
+                # Cálculo de Snake Draft: descobre se a pick_no pertence ao seu slot
+                round_no = ((p_no - 1) // num_times) + 1
+                if round_no % 2 != 0: # Round Ímpar (1, 3, 5...)
+                    slot_da_pick = ((p_no - 1) % num_times) + 1
+                else: # Round Par (2, 4, 6...) - Ordem Inversa
+                    slot_da_pick = num_times - ((p_no - 1) % num_times)
+                
+                if slot_da_pick == minha_posicao:
                     my_picks.append(p)
             
             if my_picks:
@@ -115,7 +123,7 @@ try:
                     p_pos = p.get('metadata', {}).get('position', '??')
                     st.write(f"**{p_pos}**: {p_name}")
             else:
-                st.info(f"Nenhuma pick encontrada para '{meu_nome_sleeper}'. Verifique o nome no Sleeper.")
+                st.info(f"Aguardando sua vez de escolher na posição {minha_posicao}...")
         else:
             st.write("Draft sem escolhas.")
 
