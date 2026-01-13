@@ -56,100 +56,69 @@ def calculate_war_room_score(df):
         v_adp = (210 - adp_real) * 0.9
         v_proj = row.get('Proj', 0) * 0.02
         score_base = v_media + v_adp + v_proj
-
         pos = str(row.get('FantPos', '')).upper().strip()
         perf_factor = min(1.0, row.get('Media_4_Anos', 0) / 120)
-        
         if pos in ['RB', 'WR']: mult_pos = 1.3 + (0.5 * perf_factor)
         elif pos == 'TE': mult_pos = 1.25 + (0.35 * perf_factor)
         elif pos == 'QB': mult_pos = 1.2 + (0.25 * perf_factor)
         elif pos in ['DEF', 'K']: mult_pos = 0.7 + (0.2 * perf_factor)
         else: mult_pos = 1.0
-        
         tier = row.get('Tier', 14)
         if pd.isna(tier) or tier <= 0: tier = 14
         bonus_tier = max(0, (25 - (tier - 1) * 1.92) / 100)
         mult_tier = 1 + bonus_tier
-
         return (score_base * mult_pos) * mult_tier
-
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- SIDEBAR ---
-# --- SIDEBAR ---
-with st.sidebar:
-    st.title("🏈 War Room Config")
-    draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
-    
-    if st.button("🔄 Atualizar"):
-        st.cache_data.clear()
-        st.rerun()
-
-    st.divider()
-    st.subheader("📋 Meu Roster")
-    
-    # Criamos uma lista de todos os nomes que já escolheram (Bots ou Humanos)
-    # Buscamos no metadata da pick quem é o "owner"
-    participantes = []
-    if 'picks_data' in locals() and picks_data:
-        for p in picks_data:
-            # Tenta pegar o nome do usuário, se não tiver, tenta o nome do time no metadata
-            nome = p.get('metadata', {}).get('first_name') or p.get('metadata', {}).get('team_name') or f"Slot {p.get('roster_id')}"
-            if nome and nome not in participantes:
-                participantes.append(nome)
-    
-    if participantes:
-        meu_nome = st.selectbox("Selecione seu Nome/Time", options=participantes)
-        
-        # Filtramos as picks onde o nome bate com o selecionado
-        my_picks = [
-            p for p in picks_data 
-            if (p.get('metadata', {}).get('first_name') == meu_nome or 
-                p.get('metadata', {}).get('team_name') == meu_nome or
-                f"Slot {p.get('roster_id')}" == meu_nome)
-        ]
-        
-        if my_picks:
-            my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
-            for p in my_picks_sorted:
-                p_name = p.get('metadata', {}).get('full_name', 'Player')
-                p_pos = p.get('metadata', {}).get('position', '??')
-                st.write(f"**{p_pos}**: {p_name}")
-        else:
-            st.write("Selecione seu nome acima.")
-    else:
-        st.write("Nenhuma pick detectada.")
-
-# --- PROCESSAMENTO PRINCIPAL ---
+# --- PROCESSAMENTO INICIAL DOS DADOS ---
 try:
-    # 1. Planilha
+    # 1. Carregar Planilha
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
 
-    # 2. Dados Sleeper
+    # 2. Carregar Sleeper
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
-    
-    resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
-    if resp_picks.status_code != 200:
-        st.error("Draft ID não encontrado no Sleeper.")
-        st.stop()
-    picks_data = resp_picks.json()
-    
-    # Lógica do Roster na Sidebar (Filtro por Slot/Roster_ID)
-    my_picks = [p for p in picks_data if str(p.get('roster_id')) == str(my_slot)]
-    
-    with roster_placeholder.container():
-        if picks_data:
-            # DEDO-DURO: Mostra quais IDs de roster já fizeram escolhas
-            ids_que_ja_escolheram = set([str(p.get('roster_id')) for p in picks_data])
-            st.caption(f"Slots com picks feitas: {', '.join(sorted(ids_que_ja_escolheram))}")
+
+    # --- SIDEBAR ---
+    with st.sidebar:
+        st.title("🏈 War Room Config")
+        draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
+        
+        if st.button("🔄 Atualizar"):
+            st.cache_data.clear()
+            st.rerun()
+
+        st.divider()
+        st.subheader("📋 Meu Roster")
+        
+        # Busca Picks do Sleeper para identificar participantes
+        resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
+        picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
+        
+        # Identifica quem já escolheu
+        participantes = []
+        for p in picks_data:
+            meta = p.get('metadata', {})
+            nome = meta.get('first_name') or meta.get('team_name') or meta.get('display_name') or f"Slot {p.get('roster_id')}"
+            if nome and nome not in participantes:
+                participantes.append(nome)
+        
+        if participantes:
+            meu_nome = st.selectbox("Selecione seu Nome/Time", options=participantes)
             
-            my_picks = [p for p in picks_data if str(p.get('roster_id')) == str(my_slot)]
+            # Filtra as picks do usuário selecionado
+            my_picks = [
+                p for p in picks_data 
+                if (p.get('metadata', {}).get('first_name') == meu_nome or 
+                    p.get('metadata', {}).get('team_name') == meu_nome or
+                    p.get('metadata', {}).get('display_name') == meu_nome or
+                    f"Slot {p.get('roster_id')}" == meu_nome)
+            ]
             
             if my_picks:
                 my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
@@ -158,11 +127,11 @@ try:
                     p_pos = p.get('metadata', {}).get('position', '??')
                     st.write(f"**{p_pos}**: {p_name}")
             else:
-                st.write(f"Nenhuma pick no slot {my_slot} ainda.")
+                st.write("Aguardando escolhas...")
         else:
-            st.write("Sem dados de picks no Sleeper.")
+            st.write("Nenhuma pick detectada ainda.")
 
-    # 3. Disponibilidade e Pontuação
+    # 3. Filtragem de Disponíveis (Usa picks_data carregado na sidebar)
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
     
@@ -179,7 +148,7 @@ try:
     available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- DASHBOARD ---
+    # --- UI DASHBOARD PRINCIPAL ---
     col1, col2, col3 = st.columns([1, 1, 2])
     col1.metric("Pick Atual", len(picks_data) + 1)
     col2.metric("Disponíveis", len(available))
