@@ -138,22 +138,39 @@ try:
     available = available[~available['norm_name'].isin(picked_names_set)]
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # Lógica Power Ranking
+    # --- NOVA LÓGICA DE POWER RANKING (POR SLOT) ---
     ranking_data = []
     if picks_data:
+        # Criamos o dicionário de scores
         score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
-        roster_scores = {}
-        for p in picks_data:
-            rid = p.get('roster_id') or "N/A"
-            pid = str(p.get('player_id'))
-            roster_scores[rid] = roster_scores.get(rid, 0) + score_dict.get(pid, 50.0)
         
-        for rid, total in roster_scores.items():
-            nome_label = f"Time {rid}"
-            if str(rid) == str(minha_posicao): nome_label = "🏆 SEU TIME"
-            ranking_data.append({"Time": nome_label, "Soma Score": round(total, 1)})
+        # Dicionário para guardar a soma de cada um dos 10 (ou num_times) slots
+        slot_scores = {i: 0.0 for i in range(1, num_times + 1)}
+        
+        for p in picks_data:
+            p_no = p.get('pick_no')
+            pid = str(p.get('player_id'))
+            
+            # Cálculo matemático para saber de qual SLOT é essa pick
+            round_no = ((p_no - 1) // num_times) + 1
+            if round_no % 2 != 0: # Round Ímpar
+                slot_da_pick = ((p_no - 1) % num_times) + 1
+            else: # Round Par
+                slot_da_pick = num_times - ((p_no - 1) % num_times)
+            
+            # Soma o score do jogador ao slot correspondente
+            score_p = score_dict.get(pid, 0.0)
+            if score_p == 0.0: score_p = 50.0 # Valor reserva caso o jogador não esteja na sua planilha
+            
+            slot_scores[slot_da_pick] += score_p
+        
+        # Transforma o dicionário em uma lista para o gráfico/tabela
+        for slot, total in slot_scores.items():
+            nome_label = f"Time Slot {slot}"
+            if slot == minha_posicao: nome_label = "🏆 SEU TIME"
+            ranking_data.append({"Time": nome_label, "Poder Total": round(total, 1)})
     
-    df_ranking = pd.DataFrame(ranking_data).sort_values(by="Soma Score", ascending=False)
+    df_ranking = pd.DataFrame(ranking_data).sort_values(by="Poder Total", ascending=False)
 
     # --- UI DASHBOARD ---
     c1, c2, c3 = st.columns([1, 1, 2])
