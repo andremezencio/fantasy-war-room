@@ -19,8 +19,6 @@ st.markdown("""
         color: white;
     }
     .stTabs [aria-selected="true"] { background-color: #4CAF50 !important; }
-    /* Estilização para o Roster na barra lateral */
-    .roster-text { font-size: 14px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -41,12 +39,14 @@ def normalize_name(name):
 
 @st.cache_data(ttl=3600)
 def get_sleeper_players():
-    res = requests.get("https://api.sleeper.app/v1/players/nfl")
-    players = res.json()
-    mapping = {f"{v['first_name']} {v['last_name']}": k for k, v in players.items() if v.get('active')}
-    mapping["Lamar Jackson"] = "4881"
-    # Retorna o mapping e os detalhes dos players para busca de posição posterior
-    return mapping, players
+    try:
+        res = requests.get("https://api.sleeper.app/v1/players/nfl")
+        players = res.json()
+        mapping = {f"{v['first_name']} {v['last_name']}": k for k, v in players.items() if v.get('active')}
+        mapping["Lamar Jackson"] = "4881"
+        return mapping
+    except:
+        return {"Lamar Jackson": "4881"}
 
 def calculate_war_room_score(df):
     def score_row(row):
@@ -56,74 +56,76 @@ def calculate_war_room_score(df):
         v_adp = (210 - adp_real) * 0.9
         v_proj = row.get('Proj', 0) * 0.02
         score_base = v_media + v_adp + v_proj
-
         pos = str(row.get('FantPos', '')).upper().strip()
         perf_factor = min(1.0, row.get('Media_4_Anos', 0) / 120)
-        
         if pos in ['RB', 'WR']: mult_pos = 1.3 + (0.5 * perf_factor)
         elif pos == 'TE': mult_pos = 1.25 + (0.35 * perf_factor)
         elif pos == 'QB': mult_pos = 1.2 + (0.25 * perf_factor)
         elif pos in ['DEF', 'K']: mult_pos = 0.7 + (0.2 * perf_factor)
         else: mult_pos = 1.0
-        
         tier = row.get('Tier', 14)
         if pd.isna(tier) or tier <= 0: tier = 14
         bonus_tier = max(0, (25 - (tier - 1) * 1.92) / 100)
         mult_tier = 1 + bonus_tier
-
         return (score_base * mult_pos) * mult_tier
-
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- PROCESSAMENTO INICIAL ---
+# --- SIDEBAR (Sempre Visível) ---
+with st.sidebar:
+    st.title("🏈 War Room Config")
+    draft_id = st.text_input("Sleeper Draft ID", value="1314740945048043520")
+    
+    btn_update = st.button("🔄 Forçar Atualização")
+    if btn_update:
+        st.cache_data.clear()
+        # Não usamos rerun aqui para evitar loops no erro, ele atualizará no próximo ciclo
+
+    st.divider()
+    st.subheader("📋 Meu Roster")
+    roster_placeholder = st.empty() # Espaço reservado para o Roster
+
+# --- PROCESSAMENTO PRINCIPAL ---
 try:
-    # 1. Dados da Planilha
+    # 1. Carregar Planilha
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
-    
-    # 2. Dados do Sleeper
-    name_to_id, all_players_data = get_sleeper_players()
+
+    # 2. Carregar Sleeper (Picks e Usuários)
+    name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
     
-    # Sidebar Setup
-    with st.sidebar:
-        st.title("🏈 War Room Config")
-        draft_id = st.text_input("Sleeper Draft ID", value="1314740945048043520")
-        
-        # Obter picks do draft
-        picks_res = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
-        picks_data = picks_res.json()
-        
-        # Identificar usuários para o "Meu Time"
-        users_res = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/users")
-        users_data = users_res.json()
+    # Busca Picks
+    resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
+    if resp_picks.status_code != 200:
+        st.error("Draft ID não encontrado no Sleeper.")
+        st.stop()
+    picks_data = resp_picks.json()
+    
+    # Busca Usuários
+    resp_users = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/users")
+    users_data = resp_users.json() if resp_users.status_code == 200 else []
+    
+    # Seletor de Time no Sidebar
+    if users_data:
         user_names = {u['user_id']: u['display_name'] for u in users_data}
+        selected_user = st.sidebar.selectbox("Selecione seu Time", options=list(user_names.keys()), format_func=lambda x: user_names[x])
         
-        selected_user = st.selectbox("Selecione seu Time (Roster)", options=list(user_names.keys()), format_func=lambda x: user_names[x])
-        
-        if st.button("🔄 Forçar Atualização"):
-            st.cache_data.clear()
-            st.rerun()
-            
-        st.divider()
-        
-        # --- SEÇÃO MEU TIME ---
-        st.subheader("📋 Meu Roster")
+        # Preencher Roster no Sidebar
         my_picks = [p for p in picks_data if p['picked_by'] == selected_user]
-        if my_picks:
-            for p in my_picks:
-                p_name = p.get('metadata', {}).get('full_name', 'Desconhecido')
-                p_pos = p.get('metadata', {}).get('position', '??')
-                st.markdown(f"**{p_pos}**: {p_name}")
-        else:
-            st.write("Nenhum jogador draftado ainda.")
-        st.divider()
+        with roster_placeholder.container():
+            if my_picks:
+                for p in my_picks:
+                    p_name = p.get('metadata', {}).get('full_name', 'Player')
+                    p_pos = p.get('metadata', {}).get('position', '??')
+                    st.write(f"**{p_pos}**: {p_name}")
+            else:
+                st.write("Aguardando escolhas...")
 
-    # 3. Lógica de Disponibilidade
+    # 3. Filtragem de Disponíveis
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
     
@@ -140,7 +142,7 @@ try:
     available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- UI ÁREA PRINCIPAL ---
+    # --- UI DASHBOARD ---
     col1, col2, col3 = st.columns([1, 1, 2])
     col1.metric("Pick Atual", len(picks_data) + 1)
     col2.metric("Disponíveis", len(available))
@@ -151,9 +153,7 @@ try:
 
     st.divider()
 
-    tab_geral, tab_qb, tab_rb, tab_wr, tab_te, tab_flex, tab_def_k = st.tabs([
-        "💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K"
-    ])
+    tabs = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K"])
 
     def show_table(data):
         st.dataframe(
@@ -167,13 +167,14 @@ try:
             hide_index=True, use_container_width=True
         )
 
-    with tab_geral: show_table(available)
-    with tab_qb: show_table(available[available['FantPos'] == 'QB'])
-    with tab_rb: show_table(available[available['FantPos'] == 'RB'])
-    with tab_wr: show_table(available[available['FantPos'] == 'WR'])
-    with tab_te: show_table(available[available['FantPos'] == 'TE'])
-    with tab_flex: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
-    with tab_def_k: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
+    with tabs[0]: show_table(available)
+    with tabs[1]: show_table(available[available['FantPos'] == 'QB'])
+    with tabs[2]: show_table(available[available['FantPos'] == 'RB'])
+    with tabs[3]: show_table(available[available['FantPos'] == 'WR'])
+    with tabs[4]: show_table(available[available['FantPos'] == 'TE'])
+    with tabs[5]: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
+    with tabs[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
 
 except Exception as e:
-    st.error(f"Erro: {e}")
+    st.error(f"Erro ao processar dados: {e}")
+    st.info("Dica: Verifique se o Draft ID é válido e se a liga já foi criada no Sleeper.")
