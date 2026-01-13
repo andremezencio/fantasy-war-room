@@ -77,12 +77,10 @@ def calculate_war_room_score(df):
     return df
 
 # --- SIDEBAR ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🏈 War Room Config")
     draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
-    
-    # Seleção de Slot (Lógica universal para Mock e Liga Real)
-    my_slot = st.number_input("Sua Posição no Draft (Slot)", min_value=1, max_value=16, value=1)
     
     if st.button("🔄 Atualizar"):
         st.cache_data.clear()
@@ -90,7 +88,38 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📋 Meu Roster")
-    roster_placeholder = st.empty()
+    
+    # Criamos uma lista de todos os nomes que já escolheram (Bots ou Humanos)
+    # Buscamos no metadata da pick quem é o "owner"
+    participantes = []
+    if 'picks_data' in locals() and picks_data:
+        for p in picks_data:
+            # Tenta pegar o nome do usuário, se não tiver, tenta o nome do time no metadata
+            nome = p.get('metadata', {}).get('first_name') or p.get('metadata', {}).get('team_name') or f"Slot {p.get('roster_id')}"
+            if nome and nome not in participantes:
+                participantes.append(nome)
+    
+    if participantes:
+        meu_nome = st.selectbox("Selecione seu Nome/Time", options=participantes)
+        
+        # Filtramos as picks onde o nome bate com o selecionado
+        my_picks = [
+            p for p in picks_data 
+            if (p.get('metadata', {}).get('first_name') == meu_nome or 
+                p.get('metadata', {}).get('team_name') == meu_nome or
+                f"Slot {p.get('roster_id')}" == meu_nome)
+        ]
+        
+        if my_picks:
+            my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
+            for p in my_picks_sorted:
+                p_name = p.get('metadata', {}).get('full_name', 'Player')
+                p_pos = p.get('metadata', {}).get('position', '??')
+                st.write(f"**{p_pos}**: {p_name}")
+        else:
+            st.write("Selecione seu nome acima.")
+    else:
+        st.write("Nenhuma pick detectada.")
 
 # --- PROCESSAMENTO PRINCIPAL ---
 try:
