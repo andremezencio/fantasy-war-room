@@ -59,17 +59,25 @@ def calculate_war_room_score(df):
         pos = str(row.get('FantPos', '')).upper().strip()
         perf_factor = min(1.0, row.get('Media_4_Anos', 0) / 120)
         
-        if pos in ['RB', 'WR']: mult_pos = 1.3 + (0.5 * perf_factor)
-        elif pos in ['QB', 'TE']: mult_pos = 1.2 + (0.25 * perf_factor)
-        elif pos in ['DEF', 'K']: mult_pos = 0.7 + (0.2 * perf_factor)
-        else: mult_pos = 1.0
+        if pos in ['RB', 'WR']: 
+            mult_pos = 1.3 + (0.5 * perf_factor) # Max 1.8
+        elif pos == 'TE':
+            # Pequeno ajuste: TEs de elite ganham um fôlego extra para competir com WRs
+            mult_pos = 1.25 + (0.35 * perf_factor) # Max 1.6
+        elif pos == 'QB':
+            mult_pos = 1.2 + (0.25 * perf_factor) # Max 1.45
+        elif pos in ['DEF', 'K']:
+            mult_pos = 0.7 + (0.2 * perf_factor)
+        else:
+            mult_pos = 1.0
         
-        # 3. BÔNUS DE TIER ESCALONADO (1 a 14)
-        # Tier 1 = +15% bônus | Tier 14 = 0% bônus
+        # 3. AJUSTE DE TIER (CURVA MAIS AGRESSIVA NO TOPO)
+        # Tier 1 = +25% bônus | Tier 14 = 0% bônus
         tier = row.get('Tier', 14)
         if pd.isna(tier) or tier <= 0: tier = 14
         
-        bonus_tier = max(0, (15 - (tier - 1) * 1.15) / 100)
+        # Nova fórmula de bônus: começa em 25% e desce de forma linear
+        bonus_tier = max(0, (25 - (tier - 1) * 1.92) / 100)
         mult_tier = 1 + bonus_tier
 
         return (score_base * mult_pos) * mult_tier
