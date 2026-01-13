@@ -3,11 +3,12 @@ import pandas as pd
 import requests
 import unicodedata
 import re
+import time
 
 # Configuração da Página
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
 
-# --- ESTILO CSS ---
+# --- ESTILO CSS PARA ABAS ---
 st.markdown("""
     <style>
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
@@ -69,23 +70,14 @@ def calculate_war_room_score(df):
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- PROCESSAMENTO ---
+# --- PROCESSAMENTO PRINCIPAL ---
 try:
-    # --- AJUSTE DO PASSO 2 AQUI ---
-    # Pegamos a URL dos Secrets
+    # 1. Carregamento da Planilha (Método Direto via CSV para evitar erros de biblioteca)
     sheet_url = st.secrets["spreadsheet_url"]
-    
-    # Esta lógica transforma o link do Google Sheets em um link de download de CSV
-    if "/edit" in sheet_url:
-        csv_url = sheet_url.split('/edit')[0] + '/export?format=csv'
-    else:
-        csv_url = sheet_url
-
-    # Lemos os dados diretamente com o Pandas, sem precisar da biblioteca GSheets
+    # Adicionamos um timestamp no final para forçar o Google a ignorar o cache
+    csv_url = sheet_url.split('/edit')[0] + '/export?format=csv&t=' + str(int(time.time()))
     df_raw = pd.read_csv(csv_url)
-    # ---------------------------------------------
 
-    # O resto do seu código continua igual daqui para baixo...
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
@@ -100,7 +92,7 @@ try:
         minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
         num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
         
-        if st.button("🔄 Atualizar"):
+        if st.button("🔄 Atualizar Geral"):
             st.cache_data.clear()
             st.rerun()
 
@@ -125,11 +117,11 @@ try:
                 my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
                 for p in my_picks_sorted:
                     meta = p.get('metadata', {})
-                    p_name = meta.get('full_name') or f"{meta.get('first_name', '')} {meta.get('last_name', '')}".strip() or "Jogador"
+                    p_name = meta.get('full_name') or f"{meta.get('first_name', '')} {meta.get('last_name', '')}".strip()
                     p_pos = meta.get('position', '??')
                     st.write(f"**{p_pos}**: {p_name}")
             else:
-                st.info(f"Aguardando sua vez na posição {minha_posicao}...")
+                st.info(f"Aguardando sua vez (# {minha_posicao})")
 
         st.divider()
         st.subheader("🕒 Picks Recentes")
@@ -138,7 +130,7 @@ try:
                 m = p.get('metadata', {})
                 st.caption(f"#{p['pick_no']} {m.get('position')} {m.get('full_name')}")
 
-    # --- CÁLCULO POWER RANKING ---
+    # --- CÁLCULO DE DISPONIBILIDADE E POWER RANKING ---
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
@@ -150,6 +142,7 @@ try:
     available = available[~available['norm_name'].isin(picked_names_set)]
     available = available.sort_values(by='Score_Final', ascending=False)
 
+    # Lógica Power Ranking por Média (Decrescente)
     ranking_data = []
     if picks_data:
         score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
@@ -169,11 +162,10 @@ try:
         
         for slot, total in slot_scores.items():
             qtd = slot_counts[slot]
-            media = round(total / qtd, 1) if qtd > 0 else 0.0
-            label = f"Slot {slot}"
-            if slot == minha_posicao: label = "🏆 VOCÊ"
-            
             if qtd > 0:
+                media = round(total / qtd, 1)
+                label = f"Slot {slot}"
+                if slot == minha_posicao: label = "🏆 VOCÊ"
                 ranking_data.append({"Time": label, "Média por Pick": media, "Qtd": qtd})
     
     df_ranking = pd.DataFrame(ranking_data).sort_values(by="Média por Pick", ascending=False)
@@ -191,7 +183,7 @@ try:
         c3.metric("Última Escolha", f"{m.get('position')} {m.get('full_name')} (Slot {l_slot})")
 
     st.divider()
-    t = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K", "📊 Power Ranking"])
+    tabs = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K", "📊 Power Ranking"])
 
     def show_table(data):
         st.dataframe(
@@ -199,27 +191,27 @@ try:
             column_config={
                 "Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250, color="green"),
                 "Tier": st.column_config.NumberColumn("Tier", format="T%d"),
-                "ADP": st.column_config.NumberColumn("ADP", format="%.1f"),
             },
             hide_index=True, use_container_width=True
         )
 
-    for i, pos_tab in enumerate(t):
-        with pos_tab:
-            if i < 7:
-                pos_list = ['QB','RB','WR','TE']
-                if i == 0: show_table(available)
-                elif i == 5: show_table(available[available['FantPos'].isin(['RB','WR','TE'])])
-                elif i == 6: show_table(available[available['FantPos'].isin(['DEF','K'])])
-                else: show_table(available[available['FantPos'] == pos_list[i-1]])
-            else:
+    for i, tab in enumerate(tabs):
+        with tab:
+            if i == 0: show_table(available)
+            elif i == 1: show_table(available[available['FantPos'] == 'QB'])
+            elif i == 2: show_table(available[available['FantPos'] == 'RB'])
+            elif i == 3: show_table(available[available['FantPos'] == 'WR'])
+            elif i == 4: show_table(available[available['FantPos'] == 'TE'])
+            elif i == 5: show_table(available[available['FantPos'].isin(['RB','WR','TE'])])
+            elif i == 6: show_table(available[available['FantPos'].isin(['DEF','K'])])
+            elif i == 7:
                 st.subheader("Ranking de Eficiência (Média de Valor por Pick)")
                 if not df_ranking.empty:
-                    # Gráfico Nativo do Streamlit (Não precisa de instalação extra)
+                    # Gráfico Nativo em Ordem Decrescente
                     st.bar_chart(df_ranking, x="Time", y="Média por Pick")
                     st.table(df_ranking[["Time", "Média por Pick", "Qtd"]])
                 else:
-                    st.info("Aguardando picks para gerar análise...")
+                    st.info("O ranking aparecerá após as primeiras picks.")
 
 except Exception as e:
-    st.error(f"Erro no sistema: {e}")
+    st.error(f"Erro ao processar: {e}")
