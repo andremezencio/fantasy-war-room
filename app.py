@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import unicodedata
 import re
-from streamlit_gsheets import GSheetsConnection
 
 # Configuração da Página
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
