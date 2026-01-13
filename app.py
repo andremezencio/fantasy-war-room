@@ -4,7 +4,7 @@ import requests
 import unicodedata
 import re
 from streamlit_gsheets import GSheetsConnection
-import plotly.express as px
+import plotly as px
 
 # Configuração da Página
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
