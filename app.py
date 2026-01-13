@@ -70,16 +70,14 @@ def calculate_war_room_score(df):
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- PROCESSAMENTO ---
+# --- PROCESSAMENTO PRINCIPAL ---
 try:
-    # 1. Carregar Planilha
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
 
-    # 2. Dados Sleeper
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
 
@@ -87,8 +85,6 @@ try:
     with st.sidebar:
         st.title("🏈 War Room Config")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
-        
-        # Lógica de Slot para Mock e Ligas Reais
         minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
         num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
         
@@ -107,10 +103,8 @@ try:
             for p in picks_data:
                 p_no = p.get('pick_no')
                 round_no = ((p_no - 1) // num_times) + 1
-                if round_no % 2 != 0: # Round Ímpar
-                    slot_da_pick = ((p_no - 1) % num_times) + 1
-                else: # Round Par
-                    slot_da_pick = num_times - ((p_no - 1) % num_times)
+                if round_no % 2 != 0: slot_da_pick = ((p_no - 1) % num_times) + 1
+                else: slot_da_pick = num_times - ((p_no - 1) % num_times)
                 
                 if slot_da_pick == minha_posicao:
                     my_picks.append(p)
@@ -125,38 +119,52 @@ try:
             else:
                 st.info(f"Aguardando sua vez na posição {minha_posicao}...")
 
-    # 3. Filtragem de Disponíveis
-    picked_ids_str = [str(p['player_id']) for p in picks_data]
-    picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
-    
+        st.divider()
+        st.subheader("🕒 Picks Recentes")
+        if picks_data:
+            for p in reversed(picks_data[-5:]):
+                m = p.get('metadata', {})
+                st.caption(f"#{p['pick_no']} - {m.get('position')} {m.get('full_name') or m.get('last_name')}")
+
+    # --- CÁLCULO DE DISPONIBILIDADE E POWER RANKING ---
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
-    
-    def is_available(row):
-        sid = str(row['sleeper_id']) if pd.notna(row['sleeper_id']) else ""
-        if sid in picked_ids_str: return False
-        if row['norm_name'] in picked_names_set: return False
-        return True
 
-    available = df_scored[df_scored.apply(is_available, axis=1)].copy()
+    picked_ids_str = [str(p['player_id']) for p in picks_data]
+    picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
+    
+    available = df_scored[~df_scored['sleeper_id'].astype(str).isin(picked_ids_str)].copy()
+    available = available[~available['norm_name'].isin(picked_names_set)]
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- UI DASHBOARD PRINCIPAL ---
-    col1, col2, col3 = st.columns([1, 1, 2])
-    col1.metric("Pick Atual", len(picks_data) + 1)
-    col2.metric("Disponíveis", len(available))
-    
+    # Lógica Power Ranking
+    ranking_data = []
     if picks_data:
-        last_p = picks_data[-1]
-        last_meta = last_p.get('metadata', {})
-        nome_last = last_meta.get('full_name') or f"{last_meta.get('first_name', '')} {last_meta.get('last_name', '')}".strip() or f"ID: {last_p.get('player_id')}"
-        col3.metric("Última Pick", nome_last)
-    else:
-        col3.metric("Última Pick", "Nenhuma")
+        score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
+        roster_scores = {}
+        for p in picks_data:
+            rid = p.get('roster_id') or "N/A"
+            pid = str(p.get('player_id'))
+            roster_scores[rid] = roster_scores.get(rid, 0) + score_dict.get(pid, 50.0)
+        
+        for rid, total in roster_scores.items():
+            nome_label = f"Time {rid}"
+            if str(rid) == str(minha_posicao): nome_label = "🏆 SEU TIME"
+            ranking_data.append({"Time": nome_label, "Soma Score": round(total, 1)})
+    
+    df_ranking = pd.DataFrame(ranking_data).sort_values(by="Soma Score", ascending=False)
+
+    # --- UI DASHBOARD ---
+    c1, c2, c3 = st.columns([1, 1, 2])
+    c1.metric("Pick Atual", len(picks_data) + 1)
+    c2.metric("Disponíveis", len(available))
+    if picks_data:
+        lm = picks_data[-1].get('metadata', {})
+        c3.metric("Última Pick", lm.get('full_name') or lm.get('last_name') or "N/A")
 
     st.divider()
-    tabs = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K"])
+    t = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K", "📊 Power Ranking"])
 
     def show_table(data):
         st.dataframe(
@@ -164,19 +172,21 @@ try:
             column_config={
                 "Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250, color="green"),
                 "Tier": st.column_config.NumberColumn("Tier", format="T%d"),
-                "Media_4_Anos": "Média Hist.",
                 "ADP": st.column_config.NumberColumn("ADP", format="%.1f"),
             },
             hide_index=True, use_container_width=True
         )
 
-    with tabs[0]: show_table(available)
-    with tabs[1]: show_table(available[available['FantPos'] == 'QB'])
-    with tabs[2]: show_table(available[available['FantPos'] == 'RB'])
-    with tabs[3]: show_table(available[available['FantPos'] == 'WR'])
-    with tabs[4]: show_table(available[available['FantPos'] == 'TE'])
-    with tabs[5]: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
-    with tabs[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
+    with t[0]: show_table(available)
+    with t[1]: show_table(available[available['FantPos'] == 'QB'])
+    with t[2]: show_table(available[available['FantPos'] == 'RB'])
+    with t[3]: show_table(available[available['FantPos'] == 'WR'])
+    with t[4]: show_table(available[available['FantPos'] == 'TE'])
+    with t[5]: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
+    with t[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
+    with t[7]:
+        st.subheader("Classificação do Draft (Soma de Scores)")
+        st.table(df_ranking)
 
 except Exception as e:
-    st.error(f"Erro ao processar dados: {e}")
+    st.error(f"Erro: {e}")
