@@ -4,6 +4,7 @@ import requests
 import unicodedata
 import re
 from streamlit_gsheets import GSheetsConnection
+import plotly.express as px
 
 # Configuração da Página
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
@@ -70,7 +71,7 @@ def calculate_war_room_score(df):
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- PROCESSAMENTO PRINCIPAL ---
+# --- PROCESSAMENTO ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
@@ -83,7 +84,7 @@ try:
 
     # --- SIDEBAR ---
     with st.sidebar:
-        st.title("🏈 War Room Config")
+        st.title("🏈 War Room")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
         minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
         num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
@@ -124,9 +125,9 @@ try:
         if picks_data:
             for p in reversed(picks_data[-5:]):
                 m = p.get('metadata', {})
-                st.caption(f"#{p['pick_no']} - {m.get('position')} {m.get('full_name') or m.get('last_name')}")
+                st.caption(f"#{p['pick_no']} {m.get('position')} {m.get('full_name')}")
 
-    # --- CÁLCULO DE DISPONIBILIDADE E POWER RANKING ---
+    # --- CÁLCULO DE DISPONIBILIDADE E POWER RANKING SEM VIÉS ---
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
@@ -138,47 +139,50 @@ try:
     available = available[~available['norm_name'].isin(picked_names_set)]
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- NOVA LÓGICA DE POWER RANKING (POR SLOT) ---
     ranking_data = []
     if picks_data:
-        # Criamos o dicionário de scores
         score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
-        
-        # Dicionário para guardar a soma de cada um dos 10 (ou num_times) slots
         slot_scores = {i: 0.0 for i in range(1, num_times + 1)}
+        slot_counts = {i: 0 for i in range(1, num_times + 1)}
         
         for p in picks_data:
             p_no = p.get('pick_no')
             pid = str(p.get('player_id'))
-            
-            # Cálculo matemático para saber de qual SLOT é essa pick
             round_no = ((p_no - 1) // num_times) + 1
-            if round_no % 2 != 0: # Round Ímpar
-                slot_da_pick = ((p_no - 1) % num_times) + 1
-            else: # Round Par
-                slot_da_pick = num_times - ((p_no - 1) % num_times)
+            if round_no % 2 != 0: slot_da_pick = ((p_no - 1) % num_times) + 1
+            else: slot_da_pick = num_times - ((p_no - 1) % num_times)
             
-            # Soma o score do jogador ao slot correspondente
-            score_p = score_dict.get(pid, 0.0)
-            if score_p == 0.0: score_p = 50.0 # Valor reserva caso o jogador não esteja na sua planilha
-            
-            slot_scores[slot_da_pick] += score_p
+            val = score_dict.get(pid, 50.0)
+            slot_scores[slot_da_pick] += val
+            slot_counts[slot_da_pick] += 1
         
-        # Transforma o dicionário em uma lista para o gráfico/tabela
         for slot, total in slot_scores.items():
-            nome_label = f"Time Slot {slot}"
-            if slot == minha_posicao: nome_label = "🏆 SEU TIME"
-            ranking_data.append({"Time": nome_label, "Poder Total": round(total, 1)})
+            qtd = slot_counts[slot]
+            media = round(total / qtd, 1) if qtd > 0 else 0.0
+            label = f"Slot {slot}"
+            if slot == minha_posicao: label = "🏆 VOCÊ"
+            
+            if qtd > 0:
+                ranking_data.append({
+                    "Time": label, 
+                    "Média por Pick": media, 
+                    "Qtd": qtd,
+                    "is_me": (slot == minha_posicao)
+                })
     
-    df_ranking = pd.DataFrame(ranking_data).sort_values(by="Poder Total", ascending=False)
+    df_ranking = pd.DataFrame(ranking_data).sort_values(by="Média por Pick", ascending=False)
 
     # --- UI DASHBOARD ---
     c1, c2, c3 = st.columns([1, 1, 2])
     c1.metric("Pick Atual", len(picks_data) + 1)
     c2.metric("Disponíveis", len(available))
     if picks_data:
-        lm = picks_data[-1].get('metadata', {})
-        c3.metric("Última Pick", lm.get('full_name') or lm.get('last_name') or "N/A")
+        last = picks_data[-1]
+        m = last.get('metadata', {})
+        lp_no = last.get('pick_no')
+        lr_no = ((lp_no - 1) // num_times) + 1
+        l_slot = ((lp_no - 1) % num_times) + 1 if lr_no % 2 != 0 else num_times - ((lp_no - 1) % num_times)
+        c3.metric("Última Escolha", f"{m.get('position')} {m.get('full_name')} (Slot {l_slot})")
 
     st.divider()
     t = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K", "📊 Power Ranking"])
@@ -194,16 +198,25 @@ try:
             hide_index=True, use_container_width=True
         )
 
-    with t[0]: show_table(available)
-    with t[1]: show_table(available[available['FantPos'] == 'QB'])
-    with t[2]: show_table(available[available['FantPos'] == 'RB'])
-    with t[3]: show_table(available[available['FantPos'] == 'WR'])
-    with t[4]: show_table(available[available['FantPos'] == 'TE'])
-    with t[5]: show_table(available[available['FantPos'].isin(['RB', 'WR', 'TE'])])
-    with t[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
-    with t[7]:
-        st.subheader("Classificação do Draft (Soma de Scores)")
-        st.table(df_ranking)
+    for i, pos_tab in enumerate(t):
+        with pos_tab:
+            if i < 7:
+                pos_list = ['QB','RB','WR','TE']
+                if i == 0: show_table(available)
+                elif i == 5: show_table(available[available['FantPos'].isin(['RB','WR','TE'])])
+                elif i == 6: show_table(available[available['FantPos'].isin(['DEF','K'])])
+                else: show_table(available[available['FantPos'] == pos_list[i-1]])
+            else:
+                st.subheader("Ranking de Eficiência (Média de Valor por Pick)")
+                if not df_ranking.empty:
+                    fig = px.bar(df_ranking, x="Média por Pick", y="Time", orientation='h',
+                                 color="is_me", color_discrete_map={True: "#4CAF50", False: "#31333F"},
+                                 text="Média por Pick")
+                    fig.update_layout(showlegend=False, height=450, margin=dict(l=0, r=0, t=10, b=10))
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.table(df_ranking[["Time", "Média por Pick", "Qtd"]])
+                else:
+                    st.info("Aguardando picks para gerar análise...")
 
 except Exception as e:
     st.error(f"Erro: {e}")
