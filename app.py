@@ -56,28 +56,34 @@ def calculate_war_room_score(df):
         v_adp = (210 - adp_real) * 0.9
         v_proj = row.get('Proj', 0) * 0.02
         score_base = v_media + v_adp + v_proj
+
         pos = str(row.get('FantPos', '')).upper().strip()
         perf_factor = min(1.0, row.get('Media_4_Anos', 0) / 120)
+        
         if pos in ['RB', 'WR']: mult_pos = 1.3 + (0.5 * perf_factor)
         elif pos == 'TE': mult_pos = 1.25 + (0.35 * perf_factor)
         elif pos == 'QB': mult_pos = 1.2 + (0.25 * perf_factor)
         elif pos in ['DEF', 'K']: mult_pos = 0.7 + (0.2 * perf_factor)
         else: mult_pos = 1.0
+        
         tier = row.get('Tier', 14)
         if pd.isna(tier) or tier <= 0: tier = 14
         bonus_tier = max(0, (25 - (tier - 1) * 1.92) / 100)
         mult_tier = 1 + bonus_tier
+
         return (score_base * mult_pos) * mult_tier
+
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🏈 War Room Config")
-    # Atualizado com seu novo ID de teste
     draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
     
-    # Nome do botão alterado conforme solicitado
+    # Seleção de Slot (Lógica universal para Mock e Liga Real)
+    my_slot = st.number_input("Sua Posição no Draft (Slot)", min_value=1, max_value=16, value=1)
+    
     if st.button("🔄 Atualizar"):
         st.cache_data.clear()
         st.rerun()
@@ -86,45 +92,39 @@ with st.sidebar:
     st.subheader("📋 Meu Roster")
     roster_placeholder = st.empty()
 
-# --- PROCESSAMENTO ---
+# --- PROCESSAMENTO PRINCIPAL ---
 try:
+    # 1. Planilha
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
 
+    # 2. Dados Sleeper
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
     
-    # Busca Picks e Usuários
     resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
-    picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
+    if resp_picks.status_code != 200:
+        st.error("Draft ID não encontrado no Sleeper.")
+        st.stop()
+    picks_data = resp_picks.json()
     
-    resp_users = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/users")
-    users_data = resp_users.json() if resp_users.status_code == 200 else []
+    # Lógica do Roster na Sidebar (Filtro por Slot/Roster_ID)
+    my_picks = [p for p in picks_data if str(p.get('roster_id')) == str(my_slot)]
     
-    # Lógica do Roster na Sidebar
-    if users_data:
-        user_names = {u['user_id']: u.get('display_name', u.get('metadata', {}).get('team_name', 'Time')) for u in users_data}
-        # Se for um Mock Draft sem usuários reais, o Sleeper às vezes não retorna display_name, usamos um fallback
-        selected_user = st.sidebar.selectbox("Selecione seu Time", options=list(user_names.keys()), format_func=lambda x: user_names[x])
-        
-        # Filtra as picks que pertencem ao ID do usuário selecionado ou ao slot dele
-        my_picks = [p for p in picks_data if str(p.get('picked_by')) == str(selected_user) or str(p.get('roster_id')) == str(selected_user)]
-        
-        with roster_placeholder.container():
-            if my_picks:
-                # Ordenar por posição para ficar bonito
-                my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
-                for p in my_picks_sorted:
-                    p_name = p.get('metadata', {}).get('full_name', 'Player')
-                    p_pos = p.get('metadata', {}).get('position', '??')
-                    st.write(f"**{p_pos}**: {p_name}")
-            else:
-                st.write("Aguardando escolhas no Sleeper...")
+    with roster_placeholder.container():
+        if my_picks:
+            my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
+            for p in my_picks_sorted:
+                p_name = p.get('metadata', {}).get('full_name', 'Player')
+                p_pos = p.get('metadata', {}).get('position', '??')
+                st.write(f"**{p_pos}**: {p_name}")
+        else:
+            st.write(f"Aguardando escolhas no slot {my_slot}...")
 
-    # Filtragem de Disponíveis
+    # 3. Disponibilidade e Pontuação
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
     
@@ -141,7 +141,7 @@ try:
     available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- UI ---
+    # --- DASHBOARD ---
     col1, col2, col3 = st.columns([1, 1, 2])
     col1.metric("Pick Atual", len(picks_data) + 1)
     col2.metric("Disponíveis", len(available))
@@ -175,4 +175,4 @@ try:
     with tabs[6]: show_table(available[available['FantPos'].isin(['DEF', 'K'])])
 
 except Exception as e:
-    st.error(f"Erro: {e}")
+    st.error(f"Erro ao processar dados: {e}")
