@@ -71,16 +71,14 @@ def calculate_war_room_score(df):
     df['Score_Final'] = df.apply(score_row, axis=1)
     return df
 
-# --- INÍCIO DO PROCESSAMENTO ---
+# --- PROCESSAMENTO ---
 try:
-    # 1. Planilha
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(spreadsheet=st.secrets["spreadsheet_url"])
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
 
-    # 2. Sleeper Mapping
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
 
@@ -89,8 +87,11 @@ try:
         st.title("🏈 War Room Config")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
         
-        # Voltando para a lógica de Slot que é à prova de falhas em Mock
-        my_slot = st.number_input("Sua Posição no Draft (1-12)", min_value=1, max_value=12, value=1)
+        # Campo para digitar seu usuário exatamente como no Sleeper
+        user_name_input = st.text_input("Seu Usuário Sleeper", value="dedemezencio")
+        
+        # Backup por Slot caso o nome falhe
+        my_slot = st.number_input("Ou Posição (Slot)", min_value=1, max_value=12, value=1)
         
         if st.button("🔄 Atualizar"):
             st.cache_data.clear()
@@ -99,13 +100,21 @@ try:
         st.divider()
         st.subheader("📋 Meu Roster")
         
-        # Busca picks atuais
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
-        # Filtra as picks que pertencem ao seu slot. 
-        # Em Mocks, o roster_id do claim costuma bater com o slot escolhido.
-        my_picks = [p for p in picks_data if str(p.get('roster_id')) == str(my_slot)]
+        # Lógica de Filtro: Procura pelo nome digitado OU pelo slot
+        my_picks = []
+        for p in picks_data:
+            meta = p.get('metadata', {})
+            # Verifica se o seu nome está em algum campo de metadata ou se o slot bate
+            is_me = (
+                meta.get('display_name') == user_name_input or 
+                meta.get('first_name') == user_name_input or
+                str(p.get('roster_id')) == str(my_slot)
+            )
+            if is_me:
+                my_picks.append(p)
         
         if my_picks:
             my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
@@ -114,7 +123,7 @@ try:
                 p_pos = p.get('metadata', {}).get('position', '??')
                 st.write(f"**{p_pos}**: {p_name}")
         else:
-            st.write(f"Sem picks no slot {my_slot} ainda.")
+            st.write("Aguardando escolhas...")
 
     # 3. Disponibilidade
     picked_ids_str = [str(p['player_id']) for p in picks_data]
@@ -133,7 +142,7 @@ try:
     available = df_scored[df_scored.apply(is_available, axis=1)].copy()
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # --- UI ---
+    # --- UI DASHBOARD ---
     col1, col2, col3 = st.columns([1, 1, 2])
     col1.metric("Pick Atual", len(picks_data) + 1)
     col2.metric("Disponíveis", len(available))
