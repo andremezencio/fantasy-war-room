@@ -140,15 +140,23 @@ try:
     ])
 
     def show_table(data):
+        # Criamos um estilo para destacar quem é Tier 1 ou 2
         st.dataframe(
             data[['Player', 'FantPos', 'Tier', 'Media_4_Anos', 'ADP', 'Score_Final']].head(30),
             column_config={
-                "Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250),
+                "Score_Final": st.column_config.ProgressColumn(
+                    "Value Score", 
+                    format="%.1f", 
+                    min_value=0, 
+                    max_value=250,
+                    color="green" # Barra verde para destacar o valor
+                ),
                 "Tier": st.column_config.NumberColumn("Tier", format="T%d"),
                 "Media_4_Anos": "Média Hist.",
-                "ADP": "ADP"
+                "ADP": st.column_config.NumberColumn("ADP", format="%.1f"),
             },
-            hide_index=True, use_container_width=True
+            hide_index=True, 
+            use_container_width=True
         )
 
     with tab_geral:
