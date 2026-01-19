@@ -205,7 +205,7 @@ try:
             elif i == 4: show_table(available[available['FantPos'] == 'TE'])
             elif i == 5: show_table(available[available['FantPos'].isin(['RB','WR','TE'])])
             elif i == 6: show_table(available[available['FantPos'].isin(['DEF','K'])])
-           elif i == 7:
+            elif i == 7:
                 st.subheader("Eficiência por Pick")
                 if not df_ranking.empty:
                     # Garantimos que o DF está ordenado antes de plotar
