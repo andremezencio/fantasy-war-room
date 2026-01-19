@@ -205,10 +205,21 @@ try:
             elif i == 4: show_table(available[available['FantPos'] == 'TE'])
             elif i == 5: show_table(available[available['FantPos'].isin(['RB','WR','TE'])])
             elif i == 6: show_table(available[available['FantPos'].isin(['DEF','K'])])
-            elif i == 7:
+           elif i == 7:
                 st.subheader("Eficiência por Pick")
                 if not df_ranking.empty:
-                    st.bar_chart(df_ranking, x="Time", y="Média por Pick")
+                    # Garantimos que o DF está ordenado antes de plotar
+                    df_ranking = df_ranking.sort_values(by="Média por Pick", ascending=False)
+                    
+                    # Para o st.bar_chart respeitar a ordem do DataFrame, 
+                    # o ideal é que o 'Time' seja o índice ou explicitado no eixo X
+                    st.bar_chart(
+                        df_ranking, 
+                        x="Time", 
+                        y="Média por Pick",
+                        use_container_width=True
+                    )
+                    
                     st.table(df_ranking[["Time", "Média por Pick", "Qtd"]])
 except Exception as e:
     st.error(f"Erro: {e}")
