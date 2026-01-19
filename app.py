@@ -8,7 +8,7 @@ import time
 # Configuração da Página
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
 
-# --- ESTILO CSS PARA ABAS ---
+# --- ESTILO CSS ---
 st.markdown("""
     <style>
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
@@ -23,6 +23,16 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- FUNÇÕES DE APOIO ---
+def get_player_name(metadata):
+    """Corrige o erro de 'None' nos nomes dos jogadores"""
+    full_name = metadata.get('full_name')
+    if full_name:
+        return full_name
+    first = metadata.get('first_name', '')
+    last = metadata.get('last_name', '')
+    name = f"{first} {last}".strip()
+    return name if name else "Jogador Desconhecido"
+
 def clean_num(val):
     if pd.isna(val) or val == 0: return 0.0
     if isinstance(val, str):
@@ -44,8 +54,7 @@ def get_sleeper_players():
         players = res.json()
         mapping = {f"{v['first_name']} {v['last_name']}": k for k, v in players.items() if v.get('active')}
         return mapping
-    except:
-        return {}
+    except: return {}
 
 def calculate_war_room_score(df):
     def score_row(row):
@@ -72,9 +81,7 @@ def calculate_war_room_score(df):
 
 # --- PROCESSAMENTO PRINCIPAL ---
 try:
-    # 1. Carregamento da Planilha (Método Direto via CSV para evitar erros de biblioteca)
     sheet_url = st.secrets["spreadsheet_url"]
-    # Adicionamos um timestamp no final para forçar o Google a ignorar o cache
     csv_url = sheet_url.split('/edit')[0] + '/export?format=csv&t=' + str(int(time.time()))
     df_raw = pd.read_csv(csv_url)
 
@@ -92,7 +99,7 @@ try:
         minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
         num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
         
-        if st.button("🔄 Atualizar Geral"):
+        if st.button("🔄 Atualizar"):
             st.cache_data.clear()
             st.rerun()
 
@@ -102,72 +109,69 @@ try:
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
-        my_picks = []
+        my_picks_count = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "K": 0, "DEF": 0}
+        
         if picks_data:
             for p in picks_data:
                 p_no = p.get('pick_no')
                 round_no = ((p_no - 1) // num_times) + 1
-                if round_no % 2 != 0: slot_da_pick = ((p_no - 1) % num_times) + 1
-                else: slot_da_pick = num_times - ((p_no - 1) % num_times)
+                slot_da_pick = ((p_no - 1) % num_times) + 1 if round_no % 2 != 0 else num_times - ((p_no - 1) % num_times)
                 
                 if slot_da_pick == minha_posicao:
-                    my_picks.append(p)
-            
-            if my_picks:
-                my_picks_sorted = sorted(my_picks, key=lambda x: x.get('metadata', {}).get('position', ''))
-                for p in my_picks_sorted:
                     meta = p.get('metadata', {})
-                    p_name = meta.get('full_name') or f"{meta.get('first_name', '')} {meta.get('last_name', '')}".strip()
                     p_pos = meta.get('position', '??')
+                    p_name = get_player_name(meta)
                     st.write(f"**{p_pos}**: {p_name}")
-            else:
-                st.info(f"Aguardando sua vez (# {minha_posicao})")
+                    if p_pos in my_picks_count: my_picks_count[p_pos] += 1
+            
+            st.divider()
+            st.subheader("🎯 Necessidades")
+            # Exemplo de formação: 1 QB, 2 RB, 2 WR, 1 TE, 1 FLEX(RB/WR/TE)
+            # Vamos simplificar para o checklist básico:
+            st.caption("Checklist Titular Estimado:")
+            cols_nec = st.columns(2)
+            cols_nec[0].write(f"{'✅' if my_picks_count['QB'] >= 1 else '🚨'} QB")
+            cols_nec[0].write(f"{'✅' if my_picks_count['RB'] >= 2 else '🚨'} RB")
+            cols_nec[1].write(f"{'✅' if my_picks_count['WR'] >= 2 else '🚨'} WR")
+            cols_nec[1].write(f"{'✅' if my_picks_count['TE'] >= 1 else '🚨'} TE")
 
         st.divider()
         st.subheader("🕒 Picks Recentes")
         if picks_data:
             for p in reversed(picks_data[-5:]):
-                m = p.get('metadata', {})
-                st.caption(f"#{p['pick_no']} {m.get('position')} {m.get('full_name')}")
+                meta = p.get('metadata', {})
+                st.caption(f"#{p['pick_no']} {meta.get('position')} {get_player_name(meta)}")
 
-    # --- CÁLCULO DE DISPONIBILIDADE E POWER RANKING ---
+    # --- CÁLCULO POWER RANKING ---
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
 
     picked_ids_str = [str(p['player_id']) for p in picks_data]
-    picked_names_set = set([normalize_name(p.get('metadata', {}).get('full_name', '')) for p in picks_data])
+    picked_names_set = set([normalize_name(get_player_name(p.get('metadata', {}))) for p in picks_data])
     
     available = df_scored[~df_scored['sleeper_id'].astype(str).isin(picked_ids_str)].copy()
     available = available[~available['norm_name'].isin(picked_names_set)]
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # Lógica Power Ranking por Média (Decrescente)
     ranking_data = []
     if picks_data:
         score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
         slot_scores = {i: 0.0 for i in range(1, num_times + 1)}
         slot_counts = {i: 0 for i in range(1, num_times + 1)}
-        
         for p in picks_data:
             p_no = p.get('pick_no')
-            pid = str(p.get('player_id'))
             round_no = ((p_no - 1) // num_times) + 1
-            if round_no % 2 != 0: slot_da_pick = ((p_no - 1) % num_times) + 1
-            else: slot_da_pick = num_times - ((p_no - 1) % num_times)
-            
-            val = score_dict.get(pid, 50.0)
+            slot_da_pick = ((p_no - 1) % num_times) + 1 if round_no % 2 != 0 else num_times - ((p_no - 1) % num_times)
+            val = score_dict.get(str(p.get('player_id')), 50.0)
             slot_scores[slot_da_pick] += val
             slot_counts[slot_da_pick] += 1
-        
         for slot, total in slot_scores.items():
             qtd = slot_counts[slot]
             if qtd > 0:
                 media = round(total / qtd, 1)
-                label = f"Slot {slot}"
-                if slot == minha_posicao: label = "🏆 VOCÊ"
+                label = "🏆 VOCÊ" if slot == minha_posicao else f"Slot {slot}"
                 ranking_data.append({"Time": label, "Média por Pick": media, "Qtd": qtd})
-    
     df_ranking = pd.DataFrame(ranking_data).sort_values(by="Média por Pick", ascending=False)
 
     # --- UI DASHBOARD ---
@@ -180,7 +184,7 @@ try:
         lp_no = last.get('pick_no')
         lr_no = ((lp_no - 1) // num_times) + 1
         l_slot = ((lp_no - 1) % num_times) + 1 if lr_no % 2 != 0 else num_times - ((lp_no - 1) % num_times)
-        c3.metric("Última Escolha", f"{m.get('position')} {m.get('full_name')} (Slot {l_slot})")
+        c3.metric("Última Escolha", f"{m.get('position')} {get_player_name(m)} (Slot {l_slot})")
 
     st.divider()
     tabs = st.tabs(["💎 Geral", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🔄 FLEX", "🛡️ DEF/K", "📊 Power Ranking"])
@@ -188,10 +192,7 @@ try:
     def show_table(data):
         st.dataframe(
             data[['Player', 'FantPos', 'Tier', 'Media_4_Anos', 'ADP', 'Score_Final']].head(30),
-            column_config={
-                "Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250, color="green"),
-                "Tier": st.column_config.NumberColumn("Tier", format="T%d"),
-            },
+            column_config={"Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250, color="green")},
             hide_index=True, use_container_width=True
         )
 
@@ -205,13 +206,9 @@ try:
             elif i == 5: show_table(available[available['FantPos'].isin(['RB','WR','TE'])])
             elif i == 6: show_table(available[available['FantPos'].isin(['DEF','K'])])
             elif i == 7:
-                st.subheader("Ranking de Eficiência (Média de Valor por Pick)")
+                st.subheader("Eficiência por Pick")
                 if not df_ranking.empty:
-                    # Gráfico Nativo em Ordem Decrescente
                     st.bar_chart(df_ranking, x="Time", y="Média por Pick")
                     st.table(df_ranking[["Time", "Média por Pick", "Qtd"]])
-                else:
-                    st.info("O ranking aparecerá após as primeiras picks.")
-
 except Exception as e:
-    st.error(f"Erro ao processar: {e}")
+    st.error(f"Erro: {e}")
