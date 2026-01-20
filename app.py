@@ -19,15 +19,14 @@ st.markdown("""
         color: white;
     }
     .stTabs [aria-selected="true"] { background-color: #4CAF50 !important; }
+    div[data-testid="stMetricValue"] { font-size: 1.8rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- FUNÇÕES DE APOIO ---
 def get_player_name(metadata):
-    """Corrige o erro de 'None' nos nomes dos jogadores"""
     full_name = metadata.get('full_name')
-    if full_name:
-        return full_name
+    if full_name: return full_name
     first = metadata.get('first_name', '')
     last = metadata.get('last_name', '')
     name = f"{first} {last}".strip()
@@ -96,16 +95,19 @@ try:
     with st.sidebar:
         st.title("🏈 War Room Config")
         draft_id = st.text_input("Sleeper Draft ID", value="1316854024770686976")
-        minha_posicao = st.number_input("Sua Posição no Draft (#)", min_value=1, max_value=16, value=1)
-        num_times = st.number_input("Total de Times no Draft", min_value=2, max_value=16, value=10)
+        minha_posicao = st.number_input("Sua Posição (#)", min_value=1, max_value=16, value=1)
+        num_times = st.number_input("Total Times", min_value=2, max_value=16, value=10)
         
         if st.button("🔄 Atualizar"):
             st.cache_data.clear()
             st.rerun()
 
+        # [MELHORIA 1] BARRA DE BUSCA
+        st.divider()
+        search_term = st.text_input("🔍 Buscar Jogador", placeholder="Digite o nome...").lower()
+
         st.divider()
         st.subheader("📋 Meu Roster")
-        
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
@@ -124,25 +126,21 @@ try:
                     st.write(f"**{p_pos}**: {p_name}")
                     if p_pos in my_picks_count: my_picks_count[p_pos] += 1
             
-            st.divider()
-            st.subheader("🎯 Necessidades")
-            # Exemplo de formação: 1 QB, 2 RB, 2 WR, 1 TE, 1 FLEX(RB/WR/TE)
-            # Vamos simplificar para o checklist básico:
-            st.caption("Checklist Titular Estimado:")
-            cols_nec = st.columns(2)
-            cols_nec[0].write(f"{'✅' if my_picks_count['QB'] >= 1 else '🚨'} QB")
-            cols_nec[0].write(f"{'✅' if my_picks_count['RB'] >= 2 else '🚨'} RB")
-            cols_nec[1].write(f"{'✅' if my_picks_count['WR'] >= 2 else '🚨'} WR")
-            cols_nec[1].write(f"{'✅' if my_picks_count['TE'] >= 1 else '🚨'} TE")
+            st.caption("Necessidades:")
+            c_n1, c_n2 = st.columns(2)
+            c_n1.write(f"{'✅' if my_picks_count['QB'] >= 1 else '🚨'} QB")
+            c_n1.write(f"{'✅' if my_picks_count['RB'] >= 2 else '🚨'} RB")
+            c_n2.write(f"{'✅' if my_picks_count['WR'] >= 3 else '🚨'} WR") # Ajustado para 3 WRs como exemplo
+            c_n2.write(f"{'✅' if my_picks_count['TE'] >= 1 else '🚨'} TE")
 
         st.divider()
-        st.subheader("🕒 Picks Recentes")
+        st.subheader("🕒 Recentes")
         if picks_data:
             for p in reversed(picks_data[-5:]):
                 meta = p.get('metadata', {})
                 st.caption(f"#{p['pick_no']} {meta.get('position')} {get_player_name(meta)}")
 
-    # --- CÁLCULO POWER RANKING ---
+    # --- CÁLCULO ---
     df_scored = calculate_war_room_score(df_raw)
     df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
     df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
@@ -152,8 +150,14 @@ try:
     
     available = df_scored[~df_scored['sleeper_id'].astype(str).isin(picked_ids_str)].copy()
     available = available[~available['norm_name'].isin(picked_names_set)]
+    
+    # [FILTRO DA BUSCA]
+    if search_term:
+        available = available[available['norm_name'].str.contains(search_term, na=False)]
+    
     available = available.sort_values(by='Score_Final', ascending=False)
 
+    # --- POWER RANKING ---
     ranking_data = []
     if picks_data:
         score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
@@ -172,6 +176,7 @@ try:
                 media = round(total / qtd, 1)
                 label = "🏆 VOCÊ" if slot == minha_posicao else f"Slot {slot}"
                 ranking_data.append({"Time": label, "Média por Pick": media, "Qtd": qtd})
+    
     df_ranking = pd.DataFrame(ranking_data).sort_values(by="Média por Pick", ascending=False)
 
     # --- UI DASHBOARD ---
@@ -192,13 +197,29 @@ try:
     def show_table(data):
         st.dataframe(
             data[['Player', 'FantPos', 'Tier', 'Media_4_Anos', 'ADP', 'Score_Final']].head(30),
-            column_config={"Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250, color="green")},
+            column_config={
+                "Score_Final": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=250, color="#4CAF50"),
+                "Tier": st.column_config.NumberColumn("Tier", format="T %d"), 
+                "Player": st.column_config.TextColumn("Jogador", width="large"),
+            },
             hide_index=True, use_container_width=True
         )
 
     for i, tab in enumerate(tabs):
         with tab:
-            if i == 0: show_table(available)
+            if i == 0: 
+                # [MELHORIA 2] MONITOR DE ESCASSEZ
+                if not search_term: # Só mostra se não estiver buscando
+                    st.caption("⚠️ **Monitor de Escassez** (Quantos jogadores restam no Top 4 Tiers)")
+                    # Cria matriz: Linhas=Tier, Colunas=Posição
+                    top_tiers = available[available['Tier'] <= 4].copy()
+                    if not top_tiers.empty:
+                        scarcity = top_tiers.groupby(['Tier', 'FantPos']).size().unstack(fill_value=0)
+                        # Reordena colunas se existirem
+                        cols_order = [c for c in ['QB', 'RB', 'WR', 'TE'] if c in scarcity.columns]
+                        st.dataframe(scarcity[cols_order], use_container_width=True)
+                
+                show_table(available)
             elif i == 1: show_table(available[available['FantPos'] == 'QB'])
             elif i == 2: show_table(available[available['FantPos'] == 'RB'])
             elif i == 3: show_table(available[available['FantPos'] == 'WR'])
@@ -208,18 +229,11 @@ try:
             elif i == 7:
                 st.subheader("Eficiência por Pick")
                 if not df_ranking.empty:
-                    # Garantimos que o DF está ordenado antes de plotar
-                    df_ranking = df_ranking.sort_values(by="Média por Pick", ascending=False)
-                    
-                    # Para o st.bar_chart respeitar a ordem do DataFrame, 
-                    # o ideal é que o 'Time' seja o índice ou explicitado no eixo X
-                    st.bar_chart(
-                        df_ranking, 
-                        x="Time", 
-                        y="Média por Pick",
-                        use_container_width=True
-                    )
-                    
+                    df_plot = df_ranking.sort_values(by="Média por Pick", ascending=False).set_index("Time")
+                    st.bar_chart(df_plot["Média por Pick"], color="#4CAF50")
                     st.table(df_ranking[["Time", "Média por Pick", "Qtd"]])
+                else:
+                    st.info("Aguardando picks...")
+
 except Exception as e:
     st.error(f"Erro: {e}")
