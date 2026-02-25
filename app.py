@@ -8,37 +8,22 @@ import time
 # --- 1. CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="War Room 2026", layout="wide", page_icon="🏈")
 
-# --- 2. ESTILO VISUAL (CLEAN & LEGÍVEL) ---
-# Removemos o fundo forçado. Usamos apenas CSS para destacar caixas e métricas.
+# --- 2. ESTILO VISUAL ---
 st.markdown("""
     <style>
-    /* Estilo das Métricas (Placar) */
     div[data-testid="stMetric"] {
-        background-color: #f0f2f6; /* Cinza bem claro para contraste suave */
+        background-color: #f0f2f6;
         border: 1px solid #d0d0d0;
         border-radius: 8px;
         padding: 10px;
         box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
     }
-    /* Adaptação para Dark Mode nativo do Streamlit */
     @media (prefers-color-scheme: dark) {
-        div[data-testid="stMetric"] {
-            background-color: #262730;
-            border: 1px solid #444;
-        }
+        div[data-testid="stMetric"] { background-color: #262730; border: 1px solid #444; }
     }
-    
-    /* Abas mais robustas */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] {
-        padding: 8px 20px;
-        font-weight: 600;
-        border-radius: 4px;
-    }
-    .stTabs [aria-selected="true"] {
-        border-bottom: 3px solid #4CAF50 !important;
-        color: #4CAF50 !important;
-    }
+    .stTabs [data-baseweb="tab"] { padding: 8px 20px; font-weight: 600; border-radius: 4px; }
+    .stTabs [aria-selected="true"] { border-bottom: 3px solid #4CAF50 !important; color: #4CAF50 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -112,17 +97,14 @@ try:
     with st.sidebar:
         st.header("🏈 War Room Pro")
         
-        # Busca
         search_term = st.text_input("🔍 Buscar Jogador", placeholder="Nome...").lower()
         
-        # Botão Atualizar (Destaque)
         if st.button("🔄 Atualizar Agora", type="primary", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
         st.markdown("---")
 
-        # Configurações (Recolhidas por padrão)
         with st.expander("⚙️ Configurações"):
             draft_id = st.text_input("ID do Draft", value="1316854024770686976")
             minha_posicao = st.number_input("Minha Posição", 1, 16, 1)
@@ -132,7 +114,7 @@ try:
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
         
-        my_picks_count = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
+        my_picks_count = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "K": 0, "DEF": 0}
         my_roster_list = []
 
         if picks_data:
@@ -144,34 +126,53 @@ try:
                 if slot_da_pick == minha_posicao:
                     meta = p.get('metadata', {})
                     pos = meta.get('position', '??')
+                    if pos == 'DST': pos = 'DEF' # Padroniza
                     my_roster_list.append(f"R{round_no}: {pos} {get_player_name(meta)}")
                     if pos in my_picks_count: my_picks_count[pos] += 1
         
-        # Cards de Necessidade (Visual Limpo)
-        st.subheader("Meu Elenco")
-        c1, c2, c3, c4 = st.columns(4)
-        def stat_box(col, label, val, req):
-            # Lógica de cor: Vermelho se zero, Amarelo se abaixo do ideal, Verde se OK
-            color = "green" if val >= req else ("orange" if val > 0 else "red")
-            col.markdown(f":{color}[**{label}**]")
-            col.markdown(f"**{val}**/{req}")
+        # --- INTELIGÊNCIA DO ROSTER ---
+        # 1 QB, 1 RB, 1 WR, 1 TE, 1 Flex, 1 K, 1 DEF, 2 BN
+        qb_start = min(1, my_picks_count["QB"])
+        rb_start = min(1, my_picks_count["RB"])
+        wr_start = min(1, my_picks_count["WR"])
+        te_start = min(1, my_picks_count["TE"])
+        k_start = min(1, my_picks_count["K"])
+        def_start = min(1, my_picks_count["DEF"])
+        
+        # O que sobra vai pro FLEX (RB, WR, TE)
+        leftover_flex = max(0, my_picks_count["RB"] - 1) + max(0, my_picks_count["WR"] - 1) + max(0, my_picks_count["TE"] - 1)
+        flex_start = min(1, leftover_flex)
+        
+        # O resto vai pro Bench
+        total_drafted = sum(my_picks_count.values())
+        total_starters = qb_start + rb_start + wr_start + te_start + flex_start + k_start + def_start
+        bench = total_drafted - total_starters
 
-        stat_box(c1, "QB", my_picks_count['QB'], 1)
-        stat_box(c2, "RB", my_picks_count['RB'], 2)
-        stat_box(c3, "WR", my_picks_count['WR'], 3)
-        stat_box(c4, "TE", my_picks_count['TE'], 1)
+        st.subheader("🎯 Meu Elenco")
+        c1, c2 = st.columns(2)
+        
+        def stat_box(col, label, val, req):
+            color = "green" if val >= req else ("orange" if val > 0 else "red")
+            col.markdown(f":{color}[**{label}** {val}/{req}]")
+
+        stat_box(c1, "QB", qb_start, 1)
+        stat_box(c2, "FLEX", flex_start, 1)
+        stat_box(c1, "RB", rb_start, 1)
+        stat_box(c2, "K", k_start, 1)
+        stat_box(c1, "WR", wr_start, 1)
+        stat_box(c2, "DEF", def_start, 1)
+        stat_box(c1, "TE", te_start, 1)
+        stat_box(c2, "BN", bench, 2)
 
         if my_roster_list:
             with st.expander("Ver Jogadores", expanded=False):
                 for item in my_roster_list: st.caption(item)
         
-        # Histórico Recente com Indicador de Valor
         with st.expander("🕒 Últimas Escolhas", expanded=False):
             if picks_data:
                 for p in reversed(picks_data[-5:]):
                     meta = p.get('metadata', {})
-                    p_name = get_player_name(meta)
-                    st.write(f"#{p['pick_no']} **{meta.get('position')}** {p_name}")
+                    st.write(f"#{p['pick_no']} **{meta.get('position')}** {get_player_name(meta)}")
 
     # --- LÓGICA DE DADOS ---
     df_scored = calculate_war_room_score(df_raw)
@@ -181,7 +182,6 @@ try:
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(get_player_name(p.get('metadata', {}))) for p in picks_data])
     
-    # Filtra Disponíveis
     available = df_scored[~df_scored['sleeper_id'].astype(str).isin(picked_ids_str)].copy()
     available = available[~available['norm_name'].isin(picked_names_set)]
     
@@ -190,9 +190,9 @@ try:
     
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # Ranking Data
+    # Ranking & Board Data
     ranking_data = []
-    board_data = [] # Para o Draft Board
+    board_data = []
     
     if picks_data:
         score_dict = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Score_Final']))
@@ -205,29 +205,25 @@ try:
             if round_no % 2 != 0: slot = ((p_no - 1) % num_times) + 1
             else: slot = num_times - ((p_no - 1) % num_times)
             
-            # Dados para o Ranking
             val = score_dict.get(str(p.get('player_id')), 50.0)
             slot_scores[slot] += val
             slot_counts[slot] += 1
             
-            # Dados para o Board
             meta = p.get('metadata', {})
             short_name = f"{meta.get('position')} {meta.get('last_name', '')}"
-            board_data.append({
-                "Round": round_no,
-                "Slot": slot,
-                "Pick": short_name
-            })
+            board_data.append({"Round": round_no, "Slot": slot, "Pick": short_name})
             
         for slot, total in slot_scores.items():
             qtd = slot_counts[slot]
             if qtd > 0:
                 media = round(total / qtd, 1)
-                label = f"S{slot}"
-                if slot == minha_posicao: label = "VOCÊ"
+                label = "VOCÊ" if slot == minha_posicao else f"S{slot}"
                 ranking_data.append({"Time": label, "Média": media, "Qtd": qtd})
     
-    df_ranking = pd.DataFrame(ranking_data).sort_values(by="Média", ascending=False)
+    # CORREÇÃO DO BUG AQUI: Garante que as colunas existem mesmo se vazio
+    df_ranking = pd.DataFrame(ranking_data, columns=["Time", "Média", "Qtd"])
+    if not df_ranking.empty:
+        df_ranking = df_ranking.sort_values(by="Média", ascending=False)
 
     # --- TOP METRICS ---
     col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
@@ -241,7 +237,7 @@ try:
         last_text = f"{m.get('position')} {get_player_name(m)}"
     col_m3.metric("Última Escolha", last_text)
 
-    st.write("") # Espaçamento
+    st.write("")
 
     # --- ABAS ---
     tabs = st.tabs(["💎 GERAL", "🗺️ BOARD", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🛡️ DEF/K", "📊 RANKING"])
@@ -259,9 +255,8 @@ try:
             hide_index=True, use_container_width=True
         )
 
-    with tabs[0]: # GERAL
-        # Monitor de Escassez
-        with st.expander("📉 Monitor de Escassez (Jogadores Elite Restantes)", expanded=False):
+    with tabs[0]: 
+        with st.expander("📉 Monitor de Escassez (Tier Drop-off)", expanded=False):
             top_tiers = available[available['Tier'] <= 4].copy()
             if not top_tiers.empty:
                 scarcity = top_tiers.groupby(['Tier', 'FantPos']).size().unstack(fill_value=0)
@@ -271,20 +266,17 @@ try:
                 st.caption("Nenhum jogador Tier 1-4 restante.")
         show_table(available)
 
-    with tabs[1]: # BOARD (NOVIDADE)
+    with tabs[1]: 
         st.subheader("Mapa do Draft")
         if board_data:
             df_board = pd.DataFrame(board_data)
-            # Cria a matriz Round x Slot
             pivot_board = df_board.pivot(index="Round", columns="Slot", values="Pick")
-            # Garante que todos os slots (1-10) apareçam
             for i in range(1, num_times + 1):
                 if i not in pivot_board.columns: pivot_board[i] = ""
             pivot_board = pivot_board.reindex(sorted(pivot_board.columns), axis=1)
-            
             st.dataframe(pivot_board, use_container_width=True)
         else:
-            st.info("O Board será preenchido conforme as picks acontecem.")
+            st.info("O Board será preenchido após a primeira escolha.")
 
     with tabs[2]: show_table(available[available['FantPos'] == 'QB'])
     with tabs[3]: show_table(available[available['FantPos'] == 'RB'])
@@ -292,14 +284,14 @@ try:
     with tabs[5]: show_table(available[available['FantPos'] == 'TE'])
     with tabs[6]: show_table(available[available['FantPos'].isin(['DEF','K'])])
     
-    with tabs[7]: # RANKING
+    with tabs[7]: 
         st.subheader("Ranking de Eficiência")
         if not df_ranking.empty:
-            df_plot = df_ranking.sort_values(by="Média", ascending=False).set_index("Time")
+            df_plot = df_ranking.set_index("Time")
             st.bar_chart(df_plot["Média"], color="#4CAF50")
             st.table(df_ranking)
         else:
-            st.info("Aguardando dados...")
+            st.info("O gráfico aparecerá após a primeira escolha.")
 
 except Exception as e:
     st.error(f"Erro: {e}")
