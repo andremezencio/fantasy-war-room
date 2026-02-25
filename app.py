@@ -98,21 +98,29 @@ try:
         st.header("🏈 War Room Pro")
         
         search_term = st.text_input("🔍 Buscar Jogador", placeholder="Nome...").lower()
-        
-        if st.button("🔄 Atualizar Agora", type="primary", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
         st.markdown("---")
 
-        with st.expander("⚙️ Configurações"):
-            draft_id = st.text_input("ID do Draft", value="1316854024770686976")
+        with st.expander("⚙️ Configurações", expanded=True):
+            # O .strip() remove espaços vazios no final caso você cole errado
+            draft_id = st.text_input("ID do Draft", value="1316854024770686976").strip()
             minha_posicao = st.number_input("Minha Posição", 1, 16, 1)
             num_times = st.number_input("Total de Times", 2, 16, 10)
+            
+            # Botão movido para DEPOIS de você inserir o ID
+            if st.button("🔄 Atualizar Agora", type="primary", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
 
-        # Processamento Picks
+        # Processamento Picks com Tratamento de Erro
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
-        picks_data = resp_picks.json() if resp_picks.status_code == 200 else []
+        
+        picks_data = []
+        if resp_picks.status_code == 200:
+            picks_data = resp_picks.json()
+            if not picks_data and draft_id:
+                st.warning("⚠️ O ID está correto, mas o draft ainda não tem escolhas (ou pode ser um ID de Liga em vez de Draft).")
+        else:
+            st.error("🚨 Erro de API. Verifique se o ID do Draft está correto.")
         
         my_picks_count = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "K": 0, "DEF": 0}
         my_roster_list = []
@@ -126,12 +134,11 @@ try:
                 if slot_da_pick == minha_posicao:
                     meta = p.get('metadata', {})
                     pos = meta.get('position', '??')
-                    if pos == 'DST': pos = 'DEF' # Padroniza
+                    if pos == 'DST': pos = 'DEF' 
                     my_roster_list.append(f"R{round_no}: {pos} {get_player_name(meta)}")
                     if pos in my_picks_count: my_picks_count[pos] += 1
         
         # --- INTELIGÊNCIA DO ROSTER ---
-        # 1 QB, 1 RB, 1 WR, 1 TE, 1 Flex, 1 K, 1 DEF, 2 BN
         qb_start = min(1, my_picks_count["QB"])
         rb_start = min(1, my_picks_count["RB"])
         wr_start = min(1, my_picks_count["WR"])
@@ -139,11 +146,9 @@ try:
         k_start = min(1, my_picks_count["K"])
         def_start = min(1, my_picks_count["DEF"])
         
-        # O que sobra vai pro FLEX (RB, WR, TE)
         leftover_flex = max(0, my_picks_count["RB"] - 1) + max(0, my_picks_count["WR"] - 1) + max(0, my_picks_count["TE"] - 1)
         flex_start = min(1, leftover_flex)
         
-        # O resto vai pro Bench
         total_drafted = sum(my_picks_count.values())
         total_starters = qb_start + rb_start + wr_start + te_start + flex_start + k_start + def_start
         bench = total_drafted - total_starters
@@ -220,7 +225,6 @@ try:
                 label = "VOCÊ" if slot == minha_posicao else f"S{slot}"
                 ranking_data.append({"Time": label, "Média": media, "Qtd": qtd})
     
-    # CORREÇÃO DO BUG AQUI: Garante que as colunas existem mesmo se vazio
     df_ranking = pd.DataFrame(ranking_data, columns=["Time", "Média", "Qtd"])
     if not df_ranking.empty:
         df_ranking = df_ranking.sort_values(by="Média", ascending=False)
