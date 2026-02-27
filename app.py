@@ -102,7 +102,7 @@ try:
 
         with st.expander("⚙️ Configurações", expanded=True):
             # O .strip() remove espaços vazios no final caso você cole errado
-            draft_id = st.text_input("ID do Draft", value=" ").strip()
+            draft_id = st.text_input("ID do Draft", value="").strip()
             minha_posicao = st.number_input("Minha Posição", 1, 16, 1)
             num_times = st.number_input("Total de Times", 2, 16, 10)
             
