@@ -115,7 +115,7 @@ try:
         st.markdown("---")
 
         with st.expander("⚙️ Configurações", expanded=True):
-            draft_id = st.text_input("ID do Draft", value="1316854024770686976").strip()
+            draft_id = st.text_input("ID do Draft", value="").strip()
             minha_posicao = st.number_input("Minha Posição", 1, 16, 1)
             num_times = st.number_input("Total de Times", 2, 16, 10)
             
