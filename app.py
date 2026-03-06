@@ -101,17 +101,15 @@ try:
         st.markdown("---")
 
         with st.expander("⚙️ Configurações", expanded=True):
-            # O .strip() remove espaços vazios no final caso você cole errado
-            draft_id = st.text_input("ID do Draft", value="").strip()
+            draft_id = st.text_input("ID do Draft", value="1316854024770686976").strip()
             minha_posicao = st.number_input("Minha Posição", 1, 16, 1)
             num_times = st.number_input("Total de Times", 2, 16, 10)
             
-            # Botão movido para DEPOIS de você inserir o ID
             if st.button("🔄 Atualizar Agora", type="primary", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
 
-        # Processamento Picks com Tratamento de Erro
+        # Processamento Picks
         resp_picks = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
         
         picks_data = []
@@ -138,15 +136,16 @@ try:
                     my_roster_list.append(f"R{round_no}: {pos} {get_player_name(meta)}")
                     if pos in my_picks_count: my_picks_count[pos] += 1
         
-        # --- INTELIGÊNCIA DO ROSTER ---
+        # --- INTELIGÊNCIA DO ROSTER (ATUALIZADA) ---
         qb_start = min(1, my_picks_count["QB"])
-        rb_start = min(1, my_picks_count["RB"])
-        wr_start = min(1, my_picks_count["WR"])
+        rb_start = min(2, my_picks_count["RB"])  # Exigência de 2 RBs
+        wr_start = min(2, my_picks_count["WR"])  # Exigência de 2 WRs
         te_start = min(1, my_picks_count["TE"])
         k_start = min(1, my_picks_count["K"])
         def_start = min(1, my_picks_count["DEF"])
         
-        leftover_flex = max(0, my_picks_count["RB"] - 1) + max(0, my_picks_count["WR"] - 1) + max(0, my_picks_count["TE"] - 1)
+        # O Flex só é preenchido com o 3º RB, 3º WR ou 2º TE
+        leftover_flex = max(0, my_picks_count["RB"] - 2) + max(0, my_picks_count["WR"] - 2) + max(0, my_picks_count["TE"] - 1)
         flex_start = min(1, leftover_flex)
         
         total_drafted = sum(my_picks_count.values())
@@ -162,9 +161,9 @@ try:
 
         stat_box(c1, "QB", qb_start, 1)
         stat_box(c2, "FLEX", flex_start, 1)
-        stat_box(c1, "RB", rb_start, 1)
+        stat_box(c1, "RB", rb_start, 2)  # Alvo alterado para 2
         stat_box(c2, "K", k_start, 1)
-        stat_box(c1, "WR", wr_start, 1)
+        stat_box(c1, "WR", wr_start, 2)  # Alvo alterado para 2
         stat_box(c2, "DEF", def_start, 1)
         stat_box(c1, "TE", te_start, 1)
         stat_box(c2, "BN", bench, 2)
