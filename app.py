@@ -86,12 +86,26 @@ try:
     csv_url = sheet_url.split('/edit')[0] + '/export?format=csv&t=' + str(int(time.time()))
     df_raw = pd.read_csv(csv_url)
 
+    # Tratamento da coluna Bye (Cria vazia se não existir na planilha)
+    if 'Bye' not in df_raw.columns:
+        df_raw['Bye'] = "-"
+    else:
+        df_raw['Bye'] = df_raw['Bye'].fillna("-").astype(str).replace(r'\.0$', '', regex=True)
+
     for col in ['Proj', 'ADP', 'Media_4_Anos', 'Tier']:
         if col in df_raw.columns:
             df_raw[col] = df_raw[col].apply(clean_num)
 
     name_to_id = get_sleeper_players()
     normalized_sleeper_map = {normalize_name(name): pid for name, pid in name_to_id.items()}
+
+    # --- LÓGICA DE SCORE E MAPEAMENTO (Antecipado para uso na sidebar) ---
+    df_scored = calculate_war_room_score(df_raw)
+    df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
+    df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
+
+    # Dicionário rápido para buscar o Bye Week pelo ID do Sleeper
+    id_to_bye = dict(zip(df_scored['sleeper_id'].astype(str), df_scored['Bye']))
 
     # --- SIDEBAR OTIMIZADA ---
     with st.sidebar:
@@ -116,12 +130,13 @@ try:
         if resp_picks.status_code == 200:
             picks_data = resp_picks.json()
             if not picks_data and draft_id:
-                st.warning("⚠️ O ID está correto, mas o draft ainda não tem escolhas (ou pode ser um ID de Liga em vez de Draft).")
+                st.warning("⚠️ O draft ainda não tem escolhas.")
         else:
             st.error("🚨 Erro de API. Verifique se o ID do Draft está correto.")
         
         my_picks_count = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "K": 0, "DEF": 0}
         my_roster_list = []
+        my_byes_count = {}
 
         if picks_data:
             for p in picks_data:
@@ -133,18 +148,25 @@ try:
                     meta = p.get('metadata', {})
                     pos = meta.get('position', '??')
                     if pos == 'DST': pos = 'DEF' 
-                    my_roster_list.append(f"R{round_no}: {pos} {get_player_name(meta)}")
+                    
+                    # Identifica o Bye
+                    p_id = str(p.get('player_id'))
+                    p_bye = id_to_bye.get(p_id, "-")
+                    
+                    if p_bye != "-" and p_bye != "nan":
+                        my_byes_count[p_bye] = my_byes_count.get(p_bye, 0) + 1
+
+                    my_roster_list.append(f"R{round_no}: {pos} {get_player_name(meta)} (Bye: {p_bye})")
                     if pos in my_picks_count: my_picks_count[pos] += 1
         
-        # --- INTELIGÊNCIA DO ROSTER (ATUALIZADA) ---
+        # --- INTELIGÊNCIA DO ROSTER ---
         qb_start = min(1, my_picks_count["QB"])
-        rb_start = min(2, my_picks_count["RB"])  # Exigência de 2 RBs
-        wr_start = min(2, my_picks_count["WR"])  # Exigência de 2 WRs
+        rb_start = min(2, my_picks_count["RB"])  
+        wr_start = min(2, my_picks_count["WR"])  
         te_start = min(1, my_picks_count["TE"])
         k_start = min(1, my_picks_count["K"])
         def_start = min(1, my_picks_count["DEF"])
         
-        # O Flex só é preenchido com o 3º RB, 3º WR ou 2º TE
         leftover_flex = max(0, my_picks_count["RB"] - 2) + max(0, my_picks_count["WR"] - 2) + max(0, my_picks_count["TE"] - 1)
         flex_start = min(1, leftover_flex)
         
@@ -161,12 +183,21 @@ try:
 
         stat_box(c1, "QB", qb_start, 1)
         stat_box(c2, "FLEX", flex_start, 1)
-        stat_box(c1, "RB", rb_start, 2)  # Alvo alterado para 2
+        stat_box(c1, "RB", rb_start, 2)  
         stat_box(c2, "K", k_start, 1)
-        stat_box(c1, "WR", wr_start, 2)  # Alvo alterado para 2
+        stat_box(c1, "WR", wr_start, 2)  
         stat_box(c2, "DEF", def_start, 1)
         stat_box(c1, "TE", te_start, 1)
         stat_box(c2, "BN", bench, 2)
+
+        # --- CONTROLE DE BYE WEEKS ---
+        if my_byes_count:
+            st.markdown("---")
+            st.markdown("🛑 **Risco de Bye Week**")
+            # Mostra semanas com sobreposição de folgas
+            for bye_week, count in sorted(my_byes_count.items()):
+                color = "red" if count >= 3 else ("orange" if count == 2 else "green")
+                st.markdown(f":{color}[Semana {bye_week}: **{count} jogador(es)**]")
 
         if my_roster_list:
             with st.expander("Ver Jogadores", expanded=False):
@@ -178,11 +209,7 @@ try:
                     meta = p.get('metadata', {})
                     st.write(f"#{p['pick_no']} **{meta.get('position')}** {get_player_name(meta)}")
 
-    # --- LÓGICA DE DADOS ---
-    df_scored = calculate_war_room_score(df_raw)
-    df_scored['norm_name'] = df_scored['Player'].apply(normalize_name)
-    df_scored['sleeper_id'] = df_scored['norm_name'].map(normalized_sleeper_map)
-
+    # --- FILTRAGEM E RANKING ---
     picked_ids_str = [str(p['player_id']) for p in picks_data]
     picked_names_set = set([normalize_name(get_player_name(p.get('metadata', {}))) for p in picks_data])
     
@@ -194,7 +221,6 @@ try:
     
     available = available.sort_values(by='Score_Final', ascending=False)
 
-    # Ranking & Board Data
     ranking_data = []
     board_data = []
     
@@ -246,11 +272,13 @@ try:
     tabs = st.tabs(["💎 GERAL", "🗺️ BOARD", "🏈 QB", "🏃 RB", "👐 WR", "🧤 TE", "🛡️ DEF/K", "📊 RANKING"])
 
     def show_table(data):
+        # A coluna Bye foi adicionada na exibição das tabelas!
         st.dataframe(
-            data[['Player', 'FantPos', 'Tier', 'Media_4_Anos', 'ADP', 'Score_Final']].head(30),
+            data[['Player', 'FantPos', 'Bye', 'Tier', 'Media_4_Anos', 'ADP', 'Score_Final']].head(30),
             column_config={
                 "Player": st.column_config.TextColumn("Jogador", width="large"),
                 "FantPos": st.column_config.TextColumn("Pos", width="small"),
+                "Bye": st.column_config.TextColumn("Bye", width="small"),
                 "Tier": st.column_config.NumberColumn("Tier", format="T%d"),
                 "Score_Final": st.column_config.ProgressColumn("Score", format="%.0f", min_value=0, max_value=250),
                 "Media_4_Anos": st.column_config.NumberColumn("Méd Pts", format="%.1f")
